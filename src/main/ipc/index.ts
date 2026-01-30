@@ -8,6 +8,7 @@ import { registerPromptsHandlers } from './prompts'
 import { registerThemeHandlers } from './theme'
 import { registerWindowHandlers } from './window'
 import { registerPermissionsHandlers } from './permissions'
+import { registerDataExportHandlers } from './dataExport'
 
 export function registerIpcHandlers(): void {
   registerSpeechHandlers()
@@ -19,6 +20,7 @@ export function registerIpcHandlers(): void {
   registerThemeHandlers()
   registerWindowHandlers()
   registerPermissionsHandlers()
+  registerDataExportHandlers()
 }
 
 export { ipcMain }

@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { PlusIcon, TrashIcon, PencilIcon } from '../components/icons'
+import { PlusIcon } from '../components/icons'
 import type { PromptEntry } from '../../shared/types'
 
 function Prompts() {

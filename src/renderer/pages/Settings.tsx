@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import type { Settings as SettingsType, PermissionStatus } from '../../shared/types'
+import type { Settings as SettingsType, PermissionStatus, ImportResult } from '../../shared/types'
 
 // e.code から表示名への変換
 const codeToDisplayName: Record<string, string> = {
@@ -32,6 +32,13 @@ function Settings() {
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null)
   const [permissions, setPermissions] = useState<PermissionStatus | null>(null)
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null)
+
+  // Export/Import state
+  const [exportIncludeHistory, setExportIncludeHistory] = useState(false)
+  const [isExporting, setIsExporting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [importMode, setImportMode] = useState<'overwrite' | 'merge'>('merge')
+  const [importResult, setImportResult] = useState<ImportResult | null>(null)
 
   useEffect(() => {
     loadSettings()
@@ -160,7 +167,38 @@ function Settings() {
     setTimeout(() => hotkeyButtonRef.current?.focus(), 0)
   }
 
-  const currentHotkey = pendingHotkey || settings.hotkey || 'Control'
+  const currentHotkey = pendingHotkey || settings.hotkey || 'Fn'
+
+  const handleExport = async () => {
+    setIsExporting(true)
+    try {
+      await window.electron.dataExport({ includeHistory: exportIncludeHistory })
+    } catch (error) {
+      console.error('Failed to export:', error)
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleImport = async () => {
+    setIsImporting(true)
+    setImportResult(null)
+    try {
+      const result = await window.electron.dataImport({ mode: importMode })
+      // キャンセルの場合は null が返る
+      if (result) {
+        setImportResult(result)
+        if (result.success) {
+          // 設定を再読み込み
+          await loadSettings()
+        }
+      }
+    } catch (error) {
+      console.error('Failed to import:', error)
+    } finally {
+      setIsImporting(false)
+    }
+  }
 
   return (
     <div className="h-full overflow-auto">
@@ -382,6 +420,109 @@ function Settings() {
               </div>
             </div>
 
+          </div>
+        </section>
+
+        {/* データ管理 */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-medium">データ管理</h2>
+          <div className="p-4 bg-gray-50 dark:bg-zinc-800 rounded-lg space-y-6">
+            {/* エクスポート */}
+            <div>
+              <p className="text-sm font-medium mb-2">エクスポート</p>
+              <p className="text-xs text-gray-500 mb-3">
+                設定・単語帳・プロンプトをJSONファイルに書き出します（APIキーは含まれません）
+              </p>
+              <div className="flex items-center gap-4">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportIncludeHistory}
+                    onChange={(e) => setExportIncludeHistory(e.target.checked)}
+                    className="rounded"
+                  />
+                  履歴を含める
+                </label>
+                <button
+                  onClick={handleExport}
+                  disabled={isExporting}
+                  className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                >
+                  {isExporting ? 'エクスポート中...' : 'エクスポート'}
+                </button>
+              </div>
+            </div>
+
+            {/* インポート */}
+            <div className="pt-4 border-t border-gray-200 dark:border-zinc-700">
+              <p className="text-sm font-medium mb-2">インポート</p>
+              <p className="text-xs text-gray-500 mb-3">
+                エクスポートしたJSONファイルから設定を復元します
+              </p>
+              <div className="flex items-center gap-4 mb-3">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === 'merge'}
+                    onChange={() => setImportMode('merge')}
+                  />
+                  マージ（既存データに追加）
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="importMode"
+                    checked={importMode === 'overwrite'}
+                    onChange={() => setImportMode('overwrite')}
+                  />
+                  上書き（既存データを置換）
+                </label>
+              </div>
+              <button
+                onClick={handleImport}
+                disabled={isImporting}
+                className="px-4 py-2 bg-gray-200 dark:bg-zinc-700 text-sm rounded-lg hover:bg-gray-300 dark:hover:bg-zinc-600 disabled:opacity-50"
+              >
+                {isImporting ? 'インポート中...' : 'ファイルを選択してインポート'}
+              </button>
+
+              {/* インポート結果 */}
+              {importResult && (
+                <div className={`mt-3 p-3 rounded-lg text-sm ${
+                  importResult.success
+                    ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300'
+                    : 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-300'
+                }`}>
+                  {importResult.success ? (
+                    <>
+                      <p className="font-medium">インポート完了</p>
+                      <ul className="mt-1 text-xs space-y-0.5">
+                        {importResult.imported.settings > 0 && (
+                          <li>設定: {importResult.imported.settings}件</li>
+                        )}
+                        {importResult.imported.dictionary > 0 && (
+                          <li>単語帳: {importResult.imported.dictionary}件</li>
+                        )}
+                        {importResult.imported.prompts > 0 && (
+                          <li>プロンプト: {importResult.imported.prompts}件</li>
+                        )}
+                        {importResult.imported.history > 0 && (
+                          <li>履歴: {importResult.imported.history}件</li>
+                        )}
+                      </ul>
+                    </>
+                  ) : (
+                    <>
+                      <p className="font-medium">インポート失敗</p>
+                      {importResult.errors.map((err, i) => (
+                        <p key={i} className="mt-1 text-xs">{err}</p>
+                      ))}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
         </section>
       </div>

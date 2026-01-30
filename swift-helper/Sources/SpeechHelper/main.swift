@@ -494,9 +494,9 @@ class HUDViewController: NSViewController {
 // MARK: - Hotkey Configuration
 
 struct HotkeyConfig {
-    var triggerKeyCodes: Set<Int64> = [59, 62]  // Default: Control (left/right)
+    var triggerKeyCodes: Set<Int64> = [63]  // Default: Fn
     var requiredModifiers: CGEventFlags = []
-    var triggerFlag: CGEventFlags = .maskControl
+    var triggerFlag: CGEventFlags = .maskSecondaryFn
 
     // キー名からkeyCodeへのマッピング
     static let keyNameToCode: [String: Int64] = [

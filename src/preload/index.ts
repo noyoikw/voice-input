@@ -1,5 +1,12 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import type { ElectronAPI, HistoryEntry, DictionaryEntry, PromptEntry, Settings, SpeechStatus } from '../shared/types'
+import type {
+  ElectronAPI,
+  HistoryEntry,
+  Settings,
+  SpeechStatus,
+  ExportOptions,
+  ImportOptions
+} from '../shared/types'
 
 const electronAPI: ElectronAPI = {
   // Speech
@@ -80,7 +87,11 @@ const electronAPI: ElectronAPI = {
   permissionsRequestAccessibility: () => ipcRenderer.invoke('permissions:requestAccessibility'),
   permissionsOpenAccessibilitySettings: () => ipcRenderer.invoke('permissions:openAccessibilitySettings'),
   permissionsOpenMicrophoneSettings: () => ipcRenderer.invoke('permissions:openMicrophoneSettings'),
-  permissionsOpenSpeechRecognitionSettings: () => ipcRenderer.invoke('permissions:openSpeechRecognitionSettings')
+  permissionsOpenSpeechRecognitionSettings: () => ipcRenderer.invoke('permissions:openSpeechRecognitionSettings'),
+
+  // Data Export/Import
+  dataExport: (options: ExportOptions) => ipcRenderer.invoke('data:export', options),
+  dataImport: (options: ImportOptions) => ipcRenderer.invoke('data:import', options)
 }
 
 contextBridge.exposeInMainWorld('electron', electronAPI)

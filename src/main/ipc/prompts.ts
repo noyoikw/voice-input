@@ -1,7 +1,7 @@
 import { ipcMain } from 'electron'
 import { getDb } from '../db'
 import { prompts } from '../db/schema'
-import { eq, desc, like } from 'drizzle-orm'
+import { eq, desc } from 'drizzle-orm'
 import type { PromptEntry } from '../../shared/types'
 
 export function registerPromptsHandlers(): void {

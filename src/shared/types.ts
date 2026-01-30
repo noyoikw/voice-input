@@ -75,6 +75,38 @@ export interface PermissionStatus {
   speechRecognition: 'granted' | 'denied' | 'not_determined' | 'restricted' | 'unknown'
 }
 
+// エクスポートデータ
+export interface ExportData {
+  version: number
+  exportedAt: string
+  settings: Omit<Settings, 'geminiApiKey'>
+  dictionary: Omit<DictionaryEntry, 'id'>[]
+  prompts: Omit<PromptEntry, 'id'>[]
+  history?: Omit<HistoryEntry, 'id'>[]
+}
+
+// エクスポートオプション
+export interface ExportOptions {
+  includeHistory: boolean
+}
+
+// インポートオプション
+export interface ImportOptions {
+  mode: 'overwrite' | 'merge'
+}
+
+// インポート結果
+export interface ImportResult {
+  success: boolean
+  imported: {
+    settings: number
+    dictionary: number
+    prompts: number
+    history: number
+  }
+  errors: string[]
+}
+
 // Electron API (preload経由で公開)
 export interface ElectronAPI {
   // Speech
@@ -132,6 +164,10 @@ export interface ElectronAPI {
   permissionsOpenAccessibilitySettings: () => Promise<void>
   permissionsOpenMicrophoneSettings: () => Promise<void>
   permissionsOpenSpeechRecognitionSettings: () => Promise<void>
+
+  // Data Export/Import
+  dataExport: (options: ExportOptions) => Promise<boolean>
+  dataImport: (options: ImportOptions) => Promise<ImportResult | null>
 }
 
 declare global {
