@@ -1,0 +1,50 @@
+# Dependencies
+node_modules/
+
+# Build outputs
+out/
+dist/
+build/
+
+# Claude Code
+.claude/
+
+# Database (development)
+*.db
+*.db-journal
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor directories
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Swift build
+swift-helper/.build/
+swift-helper/.swiftpm/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Drizzle
+drizzle/
+
+# Temporary files
+tmp/
+temp/

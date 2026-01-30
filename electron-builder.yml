@@ -1,0 +1,33 @@
+appId: com.voiceinput.app
+productName: Voice Input
+directories:
+  buildResources: build
+  output: dist
+files:
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintignore,.eslintrc.cjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+asarUnpack:
+  - resources/**
+mac:
+  target:
+    - target: dmg
+      arch:
+        - arm64
+        - x64
+  entitlementsInherit: build/entitlements.mac.plist
+  extendInfo:
+    NSMicrophoneUsageDescription: "Voice Input requires microphone access for speech recognition."
+    NSSpeechRecognitionUsageDescription: "Voice Input uses Apple Speech Recognition to convert your voice to text."
+    NSAppleEventsUsageDescription: "Voice Input needs to send keystrokes to paste text into applications."
+  extraResources:
+    - from: resources/speech-helper
+      to: speech-helper
+dmg:
+  artifactName: ${name}-${version}-${arch}.${ext}
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
