@@ -1,7 +1,7 @@
 import { ipcMain, dialog, BrowserWindow } from 'electron'
 import { getDb } from '../db'
 import { settings, dictionary, prompts, histories } from '../db/schema'
-import { ne } from 'drizzle-orm'
+import { eq, ne } from 'drizzle-orm'
 import type { ExportData, ExportOptions, ImportOptions, ImportResult } from '../../shared/types'
 import * as fs from 'fs'
 
@@ -161,6 +161,12 @@ async function importData(options: ImportOptions): Promise<ImportResult | null> 
 
     // プロンプトをインポート
     if (data.prompts && data.prompts.length > 0) {
+      // デフォルトプロンプトがある場合、既存のデフォルトを解除
+      const hasDefaultInImport = data.prompts.some((p) => p.isDefault)
+      if (hasDefaultInImport) {
+        await db.update(prompts).set({ isDefault: false }).where(eq(prompts.isDefault, true))
+      }
+
       for (const p of data.prompts) {
         await db.insert(prompts).values({
           name: p.name,
