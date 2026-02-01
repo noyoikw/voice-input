@@ -48,3 +48,6 @@ drizzle/
 # Temporary files
 tmp/
 temp/
+
+# electron-vite temp files
+electron.vite.config.*.mjs
