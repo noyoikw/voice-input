@@ -15,7 +15,7 @@ class SwiftBridge {
   private lastUpdateTime: number | null = null  // 最後に partial/final を受け取った時刻
   private currentPartialText = ''  // 現在のセグメントの partial
 
-  private static readonly SEGMENT_THRESHOLD_MS = 1000  // 1.0秒
+  private static readonly SEGMENT_THRESHOLD_MS = 500  // 0.5秒
 
   private statusChangeCallbacks: ((status: SpeechStatus) => void)[] = []
   private permissionsCallback: ((permissions: SwiftPermissions) => void) | null = null
