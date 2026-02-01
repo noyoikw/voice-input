@@ -19,7 +19,7 @@ Voice Input は、Apple SFSpeechRecognizer と Google Gemini API を組み合わ
 ### 1.3 対象プラットフォーム
 
 - macOS 13.0 (Ventura) 以上
-- Apple Silicon (arm64) / Intel (x64) 対応
+- Apple Silicon (arm64) のみ対応
 
 ---
 

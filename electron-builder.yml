@@ -16,7 +16,6 @@ mac:
     - target: dmg
       arch:
         - arm64
-        - x64
   entitlementsInherit: build/entitlements.mac.plist
   extendInfo:
     NSMicrophoneUsageDescription: "Voice Input requires microphone access for speech recognition."

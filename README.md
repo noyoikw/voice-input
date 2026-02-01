@@ -4,11 +4,12 @@ macOS 向け高精度音声入力アプリケーション。Apple SFSpeechRecogn
 
 ## 必要な環境
 
-- macOS 13.0 以上
+- macOS 13.0 (Ventura) 以上
+- Apple Silicon Mac（Intel Mac は非対応）
 - Node.js 20 以上
 - pnpm
 - Xcode Command Line Tools（Swift Helper ビルド用）
-- Google Gemini API キー
+- Google Gemini API キー（オプション：なくても動作するが、音声認識結果の補正が行われない）
 
 ## セットアップ
 
