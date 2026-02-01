@@ -620,9 +620,19 @@ class KeyMonitor {
 
     var onKeyDown: (() -> Void)?
     var onKeyUp: (() -> Void)?
-    var onEscapePressed: (() -> Void)?
+    var onCancelKeyPressed: (() -> Void)?
 
-    private let escapeKeyCode: Int64 = 53
+    /// 録音中フラグ（録音中のみキャンセルキーを処理）
+    var isRecording = false
+
+    /// 修飾キーのkeyCode一覧（これらはキャンセル対象外）
+    private let modifierKeyCodes: Set<Int64> = [
+        59, 62,  // Control
+        58, 61,  // Option
+        56, 60,  // Shift
+        55, 54,  // Command
+        63,      // Fn
+    ]
 
     func setHotkey(_ hotkeyString: String) {
         hotkeyConfig = HotkeyConfig.parse(hotkeyString)
@@ -684,13 +694,14 @@ class KeyMonitor {
 
         // 通常キーの押下（keyDown）
         if type == .keyDown {
-            // Escapeキーの処理（録音キャンセル用）
-            if keyCode == escapeKeyCode {
-                onEscapePressed?()
+            let isTriggerKey = hotkeyConfig.triggerKeyCodes.contains(keyCode)
+            let isModifierKey = modifierKeyCodes.contains(keyCode)
+
+            // 録音中に通常キー（ホットキー以外、修飾キー以外）が押されたらキャンセル
+            if isRecording && !isTriggerKey && !isModifierKey {
+                onCancelKeyPressed?()
                 return Unmanaged.passRetained(event)
             }
-
-            let isTriggerKey = hotkeyConfig.triggerKeyCodes.contains(keyCode)
 
             // 必要な修飾キーが押されているか
             let modifiersOk = hotkeyConfig.requiredModifiers.isEmpty ||
@@ -763,7 +774,7 @@ class AppController {
             self?.stopRecording()
         }
 
-        keyMonitor.onEscapePressed = { [weak self] in
+        keyMonitor.onCancelKeyPressed = { [weak self] in
             self?.cancelRecording()
         }
 
@@ -779,6 +790,7 @@ class AppController {
     }
 
     private func startRecording() {
+        keyMonitor.isRecording = true
         DispatchQueue.main.async { [weak self] in
             self?.hudViewController?.updateState(.recording)
             self?.hudWindow?.orderFront(nil)
@@ -787,6 +799,7 @@ class AppController {
     }
 
     private func stopRecording() {
+        keyMonitor.isRecording = false
         DispatchQueue.main.async { [weak self] in
             self?.hudViewController?.updateState(.rewriting)
         }
@@ -794,6 +807,7 @@ class AppController {
     }
 
     private func cancelRecording() {
+        keyMonitor.isRecording = false
         DispatchQueue.main.async { [weak self] in
             self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
             self?.hudWindow?.orderOut(nil)
