@@ -10,6 +10,13 @@ class SwiftBridge {
   private lastText = ''
   private status: SpeechStatus = 'idle'
 
+  // セグメント蓄積用の状態
+  private confirmedSegments: string[] = []  // 確定済みセグメント
+  private lastUpdateTime: number | null = null  // 最後に partial/final を受け取った時刻
+  private currentPartialText = ''  // 現在のセグメントの partial
+
+  private static readonly SEGMENT_THRESHOLD_MS = 1000  // 1.0秒
+
   private statusChangeCallbacks: ((status: SpeechStatus) => void)[] = []
   private permissionsCallback: ((permissions: SwiftPermissions) => void) | null = null
 
@@ -77,23 +84,58 @@ class SwiftBridge {
 
         case 'started':
           this.currentSessionId = crypto.randomUUID()
+          this.confirmedSegments = []  // セッション開始時にリセット
+          this.currentPartialText = ''
+          this.lastUpdateTime = null
           this.lastText = ''
           this.setStatus('recognizing')
           break
 
-        case 'partial':
-          this.lastText = message.text || ''
-          this.sendToRenderer('speech:text', message.text, false)
-          break
+        case 'partial': {
+          const newPartial = message.text || ''
+          const now = Date.now()
 
-        case 'final':
-          this.lastText = message.text || ''
-          this.sendToRenderer('speech:text', message.text, true)
+          // リセット検出: 新しい partial が前の partial の続きでない場合
+          // （最初の1文字が違う = 新しいセグメントが始まった）
+          if (this.currentPartialText && newPartial) {
+            const prevFirstChar = this.currentPartialText.charAt(0)
+            const newFirstChar = newPartial.charAt(0)
+            if (prevFirstChar !== newFirstChar) {
+              // 1.5秒以上経過していれば蓄積、未満なら言い直し
+              if (this.lastUpdateTime && (now - this.lastUpdateTime) >= SwiftBridge.SEGMENT_THRESHOLD_MS) {
+                // 追加発話: 前の partial を確定済みとして蓄積
+                this.confirmedSegments.push(this.currentPartialText)
+              }
+              // 言い直しの場合は何もしない（前の partial は破棄される）
+            }
+          }
+
+          this.currentPartialText = newPartial
+          this.lastUpdateTime = now
+          this.lastText = this.buildFullText()
+          this.sendToRenderer('speech:text', this.lastText, false)
           break
+        }
+
+        case 'final': {
+          const finalText = message.text || ''
+
+          // final テキストを確定済みに追加
+          // （partial でのリセット検出で過去のセグメントは既に追加済み）
+          if (finalText) {
+            this.confirmedSegments.push(finalText)
+          }
+
+          this.lastUpdateTime = Date.now()
+          this.currentPartialText = ''
+          this.lastText = this.buildFullText()
+          this.sendToRenderer('speech:text', this.lastText, true)
+          break
+        }
 
         case 'stopped':
-          // stoppedメッセージのテキストを使用（空文字列も含む）
-          this.lastText = message.text ?? this.lastText
+          // TypeScript側で蓄積した lastText を使用
+          // （Swift からのテキストは使わない、final ハンドラで処理済み）
           // テキストが空の場合はリライトせずに終了し、HUDを閉じる
           if (!this.lastText.trim()) {
             this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
@@ -132,6 +174,14 @@ class SwiftBridge {
     } catch (error) {
       console.error('SwiftBridge: Failed to parse message', json, error)
     }
+  }
+
+  private buildFullText(): string {
+    const confirmed = this.confirmedSegments.join(' ')
+    if (!this.currentPartialText) {
+      return confirmed
+    }
+    return confirmed ? `${confirmed} ${this.currentPartialText}` : this.currentPartialText
   }
 
   private setStatus(status: SpeechStatus): void {

@@ -7,9 +7,10 @@
  * 注意: アプリを一度起動してデータベースを作成してから実行すること
  */
 
-import Database from "better-sqlite3";
+import { execSync } from "child_process";
 import { join } from "path";
 import { homedir } from "os";
+import { existsSync } from "fs";
 
 // macOS の Application Support ディレクトリ
 const userDataPath = join(
@@ -22,15 +23,30 @@ const dbPath = join(userDataPath, "voice-input.db");
 
 console.log("Database path:", dbPath);
 
-let db: Database.Database;
-
-try {
-  db = new Database(dbPath);
-} catch (error) {
+if (!existsSync(dbPath)) {
   console.error(
-    "データベースを開けませんでした。アプリを一度起動してから再実行してください。",
+    "データベースが見つかりませんでした。アプリを一度起動してから再実行してください。",
   );
   process.exit(1);
+}
+
+// SQLを実行するヘルパー関数
+function runSQL(sql: string): string {
+  try {
+    return execSync(`sqlite3 "${dbPath}" "${sql.replace(/"/g, '\\"')}"`, {
+      encoding: "utf-8",
+    });
+  } catch (error) {
+    return "";
+  }
+}
+
+// 複数行SQLを実行するヘルパー関数
+function runMultiLineSQL(sql: string): void {
+  execSync(`sqlite3 "${dbPath}"`, {
+    input: sql,
+    encoding: "utf-8",
+  });
 }
 
 // プロンプトのシードデータ
@@ -144,37 +160,44 @@ const dictionary = [
   { reading: "くばねてす", display: "Kubernetes" },
 ];
 
+// SQLエスケープ関数
+function escapeSQL(str: string): string {
+  return str.replace(/'/g, "''");
+}
+
 // プロンプトを挿入
 console.log("\nプロンプトを挿入中...");
-const insertPrompt = db.prepare(`
-  INSERT OR IGNORE INTO prompts (name, content, is_default, created_at, updated_at)
-  VALUES (?, ?, ?, datetime('now', 'localtime'), datetime('now', 'localtime'))
-`);
-const insertPattern = db.prepare(`
-  INSERT OR IGNORE INTO prompt_app_patterns (prompt_id, app_pattern)
-  VALUES (?, ?)
-`);
 
 for (const prompt of prompts) {
   // 既存チェック
-  const existing = db
-    .prepare("SELECT id FROM prompts WHERE name = ?")
-    .get(prompt.name) as { id: number } | undefined;
+  const existing = runSQL(
+    `SELECT id FROM prompts WHERE name = '${escapeSQL(prompt.name)}'`,
+  ).trim();
+
   if (existing) {
     console.log(`  スキップ: ${prompt.name}（既に存在）`);
     continue;
   }
 
-  const result = insertPrompt.run(
-    prompt.name,
-    prompt.content,
-    prompt.isDefault ? 1 : 0,
-  );
-  const promptId = result.lastInsertRowid as number;
+  // プロンプトを挿入
+  const insertSQL = `
+    INSERT INTO prompts (name, content, is_default, created_at, updated_at)
+    VALUES ('${escapeSQL(prompt.name)}', '${escapeSQL(prompt.content)}', ${prompt.isDefault ? 1 : 0}, datetime('now', 'localtime'), datetime('now', 'localtime'));
+  `;
+  runMultiLineSQL(insertSQL);
 
+  // 挿入したIDを取得
+  const promptId = runSQL(
+    `SELECT id FROM prompts WHERE name = '${escapeSQL(prompt.name)}'`,
+  ).trim();
+
+  // アプリパターンを挿入
   if (promptId && prompt.appPatterns) {
     for (const pattern of prompt.appPatterns) {
-      insertPattern.run(promptId, pattern);
+      runMultiLineSQL(`
+        INSERT OR IGNORE INTO prompt_app_patterns (prompt_id, app_pattern)
+        VALUES (${promptId}, '${escapeSQL(pattern)}');
+      `);
     }
   }
 
@@ -183,33 +206,28 @@ for (const prompt of prompts) {
 
 // 単語帳を挿入
 console.log("\n単語帳を挿入中...");
-const insertWord = db.prepare(`
-  INSERT INTO dictionary (reading, display, created_at)
-  SELECT ?, ?, datetime('now', 'localtime')
-  WHERE NOT EXISTS (
-    SELECT 1 FROM dictionary WHERE reading = ? AND display = ?
-  )
-`);
 
 let addedCount = 0;
 let skippedCount = 0;
 
 for (const word of dictionary) {
-  const result = insertWord.run(
-    word.reading,
-    word.display,
-    word.reading,
-    word.display,
-  );
-  if (result.changes > 0) {
-    addedCount++;
-  } else {
+  // 既存チェック
+  const existing = runSQL(
+    `SELECT id FROM dictionary WHERE reading = '${escapeSQL(word.reading)}' AND display = '${escapeSQL(word.display)}'`,
+  ).trim();
+
+  if (existing) {
     skippedCount++;
+    continue;
   }
+
+  runMultiLineSQL(`
+    INSERT INTO dictionary (reading, display, created_at)
+    VALUES ('${escapeSQL(word.reading)}', '${escapeSQL(word.display)}', datetime('now', 'localtime'));
+  `);
+  addedCount++;
 }
 
 console.log(`  追加: ${addedCount}件, スキップ: ${skippedCount}件（既に存在）`);
-
-db.close();
 
 console.log("\nシード完了!");

@@ -118,7 +118,6 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
     private let audioEngine = AVAudioEngine()
 
     private var lastRecognizedText = ""
-    private var accumulatedSegments: [String] = []  // 過去のセグメントを蓄積
     private var isRecording = false
     private var stopTimer: Timer?
     private var isWaitingForFinalResult = false
@@ -244,40 +243,24 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
 
                 // 空の final 結果は無視（既に部分結果がある場合）
                 // Apple Speech Recognition が endAudio() 後に空の final を返すことがある
-                let fullText = self.getFullText(currentSegment: text)
-                if result.isFinal && text.isEmpty && !fullText.isEmpty {
-                    fputs("Ignoring empty final result, keeping: '\(fullText)'\n", stderr)
-                    sendFinal(fullText)
-                    // 最終結果待ちの場合は完了処理（既にfinal送信済み）
+                if result.isFinal && text.isEmpty && !self.lastRecognizedText.isEmpty {
+                    fputs("Ignoring empty final result, keeping: '\(self.lastRecognizedText)'\n", stderr)
+                    sendFinal(self.lastRecognizedText)
                     if self.isWaitingForFinalResult {
                         self.completeFinalResult(alreadySentFinal: true)
                     }
                     return
                 }
 
-                // 認識がリセットされたかどうかを検出
-                // 新しいテキストが前のテキストの続きでない場合（prefix関係がない場合）、
-                // かつ短くなった場合は新しいセグメントが開始されたと判断
-                let isReset = !text.isEmpty && !self.lastRecognizedText.isEmpty &&
-                              !text.hasPrefix(self.lastRecognizedText) &&
-                              !self.lastRecognizedText.hasPrefix(text) &&
-                              text.count < self.lastRecognizedText.count
-                if isReset {
-                    // 前のセグメントを蓄積
-                    fputs("Segment reset detected: '\(self.lastRecognizedText)' -> '\(text)', accumulating previous segment\n", stderr)
-                    self.accumulatedSegments.append(self.lastRecognizedText)
-                }
-
                 self.lastRecognizedText = text
 
                 if result.isFinal {
-                    sendFinal(fullText)
-                    // 最終結果待ちの場合は完了処理（既にfinal送信済み）
+                    sendFinal(text)
                     if self.isWaitingForFinalResult {
                         self.completeFinalResult(alreadySentFinal: true)
                     }
                 } else {
-                    sendPartial(fullText)
+                    sendPartial(text)
                 }
             }
         }
@@ -288,7 +271,6 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
             try audioEngine.start()
             isRecording = true
             lastRecognizedText = ""
-            accumulatedSegments = []  // セグメント蓄積もリセット
             fputs("Audio engine started successfully\n", stderr)
             sendStarted()
         } catch {
@@ -326,7 +308,6 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
 
         isRecording = false
         lastRecognizedText = ""
-        accumulatedSegments = []  // セグメント蓄積もリセット
         sendCancelled()
     }
 
@@ -359,7 +340,7 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         finalResultTimer?.invalidate()
         finalResultTimer = nil
 
-        let finalText = getFullText(currentSegment: lastRecognizedText)
+        let finalText = lastRecognizedText
         fputs("Completing with final text: '\(finalText)'\n", stderr)
 
         // タスクのクリーンアップ
@@ -374,18 +355,6 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
             sendFinal(finalText)
         }
         sendStopped(finalText)
-    }
-
-    /// 蓄積されたセグメントと現在のセグメントを結合して完全なテキストを返す
-    private func getFullText(currentSegment: String) -> String {
-        if accumulatedSegments.isEmpty {
-            return currentSegment
-        }
-        var parts = accumulatedSegments
-        if !currentSegment.isEmpty {
-            parts.append(currentSegment)
-        }
-        return parts.joined(separator: " ")
     }
 
     func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
