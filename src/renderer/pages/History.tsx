@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { MagnifyingGlassIcon, TrashIcon } from '../components/icons'
+import PageHeader from '../components/PageHeader'
 import type { HistoryEntry } from '../../shared/types'
 
 function History() {
@@ -15,7 +16,9 @@ function History() {
       setEntries((prev) => [entry, ...prev])
     })
 
-    return unsubscribe
+    return () => {
+      unsubscribe()
+    }
   }, [])
 
   const loadHistory = async () => {
@@ -62,44 +65,12 @@ function History() {
     }
   }
 
-  const handleExport = async () => {
-    try {
-      const csv = await window.electron.historyExportCsv()
-      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8' })
-      const url = URL.createObjectURL(blob)
-      const a = document.createElement('a')
-      a.href = url
-      a.download = `voice-input-history-${new Date().toISOString().slice(0, 10)}.csv`
-      a.click()
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      console.error('Failed to export history:', error)
-    }
-  }
-
   return (
     <div className="h-full flex flex-col">
-      {/* ヘッダー */}
-      <div className="p-4 border-b border-gray-200 dark:border-zinc-700">
-        <div className="flex items-center justify-between mb-4">
-          <h1 className="text-xl font-semibold">履歴</h1>
-          <div className="flex gap-2">
-            <button
-              onClick={handleExport}
-              className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-zinc-800 rounded-lg hover:bg-gray-200 dark:hover:bg-zinc-700"
-            >
-              エクスポート
-            </button>
-            <button
-              onClick={handleClearAll}
-              className="px-3 py-1.5 text-sm bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50"
-            >
-              すべて削除
-            </button>
-          </div>
-        </div>
+      <PageHeader title="履歴" />
 
-        {/* 検索 */}
+      {/* 検索 */}
+      <div className="px-6 py-3">
         <div className="relative">
           <MagnifyingGlassIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-5 h-5 text-gray-400" />
           <input
@@ -114,7 +85,7 @@ function History() {
       </div>
 
       {/* 履歴リスト */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto px-6 py-3">
         {isLoading ? (
           <div className="text-center text-gray-500 py-8">読み込み中...</div>
         ) : entries.length === 0 ? (
@@ -130,12 +101,21 @@ function History() {
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    {entry.rewrittenText && (
-                      <p className="text-sm mb-2">{entry.rewrittenText}</p>
+                    {entry.isRewritten ? (
+                      <>
+                        <p className="text-sm mb-2">{entry.rewrittenText}</p>
+                        <p className="text-xs text-gray-500 dark:text-zinc-400">
+                          原文: {entry.rawText}
+                        </p>
+                      </>
+                    ) : (
+                      <>
+                        <p className="text-sm mb-2">{entry.rawText}</p>
+                        <p className="text-xs text-gray-300 dark:text-zinc-600">
+                          APIキー未設定のため補正なし
+                        </p>
+                      </>
                     )}
-                    <p className="text-xs text-gray-500 dark:text-zinc-400">
-                      元: {entry.rawText}
-                    </p>
                     <div className="flex items-center gap-2 mt-2 text-xs text-gray-400">
                       <span>{new Date(entry.createdAt).toLocaleString('ja-JP')}</span>
                       {entry.appName && <span>• {entry.appName}</span>}
@@ -153,6 +133,16 @@ function History() {
             ))}
           </div>
         )}
+      </div>
+
+      {/* フッター */}
+      <div className="p-3 border-t border-gray-200 dark:border-zinc-700 flex justify-end">
+        <button
+          onClick={handleClearAll}
+          className="px-3 py-2 text-sm bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50"
+        >
+          すべて削除
+        </button>
       </div>
     </div>
   )

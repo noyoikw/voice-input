@@ -92,15 +92,16 @@ class SwiftBridge {
           break
 
         case 'stopped':
-          this.lastText = message.text || this.lastText
-          this.setStatus('rewriting_pending')
-          // 0.2秒後にリライト開始
-          setTimeout(() => {
-            if (this.status === 'rewriting_pending') {
-              this.setStatus('rewriting')
-              this.triggerRewrite()
-            }
-          }, 200)
+          // stoppedメッセージのテキストを使用（空文字列も含む）
+          this.lastText = message.text ?? this.lastText
+          // テキストが空の場合はリライトせずに終了し、HUDを閉じる
+          if (!this.lastText.trim()) {
+            this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
+            this.setStatus('idle')
+            break
+          }
+          this.setStatus('rewriting')
+          this.triggerRewrite()
           break
 
         case 'cancelled':
@@ -161,17 +162,17 @@ class SwiftBridge {
 
       // Gemini rewrite を呼び出す
       const { performRewrite } = await import('../gemini/GeminiClient')
-      const rewrittenText = await performRewrite(this.lastText, promptId)
+      const rewriteResult = await performRewrite(this.lastText, promptId)
 
       this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
 
       // クリップボードにコピーしてペースト
       const { pasteText } = await import('../clipboard/manager')
-      await pasteText(rewrittenText)
+      await pasteText(rewriteResult.text)
 
       // 履歴に保存してレンダラーに通知
       const { saveHistory } = await import('./history')
-      const historyEntry = await saveHistory(this.lastText, rewrittenText, promptId)
+      const historyEntry = await saveHistory(this.lastText, rewriteResult.text, rewriteResult.isRewritten, promptId)
       this.sendToRenderer('history:created', historyEntry)
 
       this.setStatus('completed')
@@ -243,6 +244,10 @@ class SwiftBridge {
 
   getLastText(): string {
     return this.lastText
+  }
+
+  getStatus(): SpeechStatus {
+    return this.status
   }
 
   checkPermissions(): Promise<SwiftPermissions | null> {

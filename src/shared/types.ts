@@ -1,5 +1,5 @@
 // 音声認識の状態
-export type SpeechStatus = 'idle' | 'recognizing' | 'rewriting_pending' | 'rewriting' | 'completed' | 'error'
+export type SpeechStatus = 'idle' | 'recognizing' | 'rewriting' | 'completed' | 'error'
 
 // Swift Helper からの権限状態
 export interface SwiftPermissions {
@@ -34,6 +34,7 @@ export interface HistoryEntry {
   id: number
   rawText: string
   rewrittenText: string | null
+  isRewritten: boolean
   appName: string | null
   promptId: number | null
   processingTimeMs: number | null
@@ -55,6 +56,16 @@ export interface PromptEntry {
   content: string
   appPatterns: string[] | null
   isDefault: boolean
+  createdAt: string
+  updatedAt: string
+}
+
+// アプリパターン情報（候補表示用）
+export interface AppPatternInfo {
+  pattern: string
+  promptId: number | null
+  promptName: string | null
+  source: 'history' | 'registered'
   createdAt: string
 }
 
@@ -79,20 +90,27 @@ export interface PermissionStatus {
 export interface ExportData {
   version: number
   exportedAt: string
-  settings: Omit<Settings, 'geminiApiKey'>
-  dictionary: Omit<DictionaryEntry, 'id'>[]
-  prompts: Omit<PromptEntry, 'id'>[]
-  history?: Omit<HistoryEntry, 'id'>[]
+  settings: Omit<Settings, 'geminiApiKey'> | null
+  dictionary: Omit<DictionaryEntry, 'id'>[] | null
+  prompts: Omit<PromptEntry, 'id'>[] | null
+  history?: Omit<HistoryEntry, 'id'>[] | null
 }
 
 // エクスポートオプション
 export interface ExportOptions {
+  includeSettings: boolean
   includeHistory: boolean
+  includeDictionary: boolean
+  includePrompts: boolean
 }
 
 // インポートオプション
 export interface ImportOptions {
   mode: 'overwrite' | 'merge'
+  importSettings: boolean
+  importHistory: boolean
+  importDictionary: boolean
+  importPrompts: boolean
 }
 
 // インポート結果
@@ -107,6 +125,7 @@ export interface ImportResult {
   errors: string[]
 }
 
+
 // Electron API (preload経由で公開)
 export interface ElectronAPI {
   // Speech
@@ -119,6 +138,7 @@ export interface ElectronAPI {
   geminiRewrite: (text: string, promptId?: number) => Promise<string>
   geminiSetApiKey: (apiKey: string) => Promise<void>
   geminiHasApiKey: () => Promise<boolean>
+  geminiDeleteApiKey: () => Promise<void>
 
   // History
   historyList: (limit?: number, offset?: number) => Promise<HistoryEntry[]>
@@ -133,6 +153,9 @@ export interface ElectronAPI {
   settingsGet: <K extends keyof Settings>(key: K) => Promise<Settings[K] | undefined>
   settingsSet: <K extends keyof Settings>(key: K, value: Settings[K]) => Promise<void>
   settingsGetAll: () => Promise<Settings>
+  settingsGetAutoLaunch: () => Promise<boolean>
+  settingsSetAutoLaunch: (enabled: boolean) => Promise<void>
+  settingsOpenAutoLaunchSettings: () => Promise<void>
 
   // Dictionary
   dictionaryList: () => Promise<DictionaryEntry[]>
@@ -143,10 +166,12 @@ export interface ElectronAPI {
   // Prompts
   promptsList: () => Promise<PromptEntry[]>
   promptsGet: (id: number) => Promise<PromptEntry | undefined>
-  promptsCreate: (entry: Omit<PromptEntry, 'id' | 'createdAt'>) => Promise<PromptEntry>
-  promptsUpdate: (id: number, entry: Partial<Omit<PromptEntry, 'id' | 'createdAt'>>) => Promise<PromptEntry>
+  promptsCreate: (entry: Omit<PromptEntry, 'id' | 'createdAt' | 'updatedAt'>) => Promise<PromptEntry>
+  promptsUpdate: (id: number, entry: Partial<Omit<PromptEntry, 'id' | 'createdAt' | 'updatedAt'>>) => Promise<PromptEntry>
   promptsDelete: (id: number) => Promise<void>
   promptsGetForApp: (appName: string) => Promise<PromptEntry | undefined>
+  promptsRestoreDefault: (id: number) => Promise<PromptEntry>
+  promptsListAppPatterns: () => Promise<AppPatternInfo[]>
 
   // Theme
   themeGet: () => Promise<'light' | 'dark'>
@@ -168,6 +193,9 @@ export interface ElectronAPI {
   // Data Export/Import
   dataExport: (options: ExportOptions) => Promise<boolean>
   dataImport: (options: ImportOptions) => Promise<ImportResult | null>
+
+  // App
+  appGetVersion: () => Promise<string>
 }
 
 declare global {

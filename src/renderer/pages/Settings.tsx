@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
+import PageHeader from '../components/PageHeader'
 import type { Settings as SettingsType, PermissionStatus, ImportResult } from '../../shared/types'
 
 // e.code から表示名への変換
@@ -26,7 +27,7 @@ const fnKeyOption = 'Fn'
 function Settings() {
   const [settings, setSettings] = useState<SettingsType>({})
   const [apiKey, setApiKey] = useState('')
-  const [hasApiKey, setHasApiKey] = useState(false)
+  const [hasApiKey, setHasApiKey] = useState<boolean | null>(null)
   const [isSaving, setIsSaving] = useState(false)
   const [isRecordingHotkey, setIsRecordingHotkey] = useState(false)
   const [pendingHotkey, setPendingHotkey] = useState<string | null>(null)
@@ -34,24 +35,39 @@ function Settings() {
   const hotkeyButtonRef = useRef<HTMLButtonElement>(null)
 
   // Export/Import state
-  const [exportIncludeHistory, setExportIncludeHistory] = useState(false)
+  const [exportSettings, setExportSettings] = useState(true)
+  const [exportHistory, setExportHistory] = useState(true)
+  const [exportDictionary, setExportDictionary] = useState(true)
+  const [exportPrompts, setExportPrompts] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
+  const [importSettings, setImportSettings] = useState(true)
+  const [importHistory, setImportHistory] = useState(true)
+  const [importDictionary, setImportDictionary] = useState(true)
+  const [importPrompts, setImportPrompts] = useState(true)
   const [isImporting, setIsImporting] = useState(false)
   const [importMode, setImportMode] = useState<'overwrite' | 'merge'>('merge')
   const [importResult, setImportResult] = useState<ImportResult | null>(null)
 
+  // Auto launch state
+  const [autoLaunch, setAutoLaunch] = useState(false)
+
   useEffect(() => {
     loadSettings()
     loadPermissions()
+    loadAutoLaunch()
 
-    // ウィンドウがフォーカスを得たときに権限を再チェック
+    // ウィンドウがフォーカスを得たときに権限と自動起動設定を再チェック
     const handleFocus = () => {
       loadPermissions()
+      loadAutoLaunch()
     }
     window.addEventListener('focus', handleFocus)
 
     // 5秒ごとにポーリング
-    const intervalId = setInterval(loadPermissions, 5000)
+    const intervalId = setInterval(() => {
+      loadPermissions()
+      loadAutoLaunch()
+    }, 5000)
 
     return () => {
       window.removeEventListener('focus', handleFocus)
@@ -84,6 +100,24 @@ function Settings() {
     }
   }
 
+  const loadAutoLaunch = async () => {
+    try {
+      const enabled = await window.electron.settingsGetAutoLaunch()
+      setAutoLaunch(enabled)
+    } catch (error) {
+      console.error('Failed to load auto launch setting:', error)
+    }
+  }
+
+  const handleAutoLaunchChange = async (enabled: boolean) => {
+    try {
+      await window.electron.settingsSetAutoLaunch(enabled)
+      setAutoLaunch(enabled)
+    } catch (error) {
+      console.error('Failed to set auto launch:', error)
+    }
+  }
+
   const handleSaveApiKey = async () => {
     if (!apiKey.trim()) return
     setIsSaving(true)
@@ -95,6 +129,15 @@ function Settings() {
       console.error('Failed to save API key:', error)
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleDeleteApiKey = async () => {
+    try {
+      await window.electron.geminiDeleteApiKey()
+      setHasApiKey(false)
+    } catch (error) {
+      console.error('Failed to delete API key:', error)
     }
   }
 
@@ -169,10 +212,19 @@ function Settings() {
 
   const currentHotkey = pendingHotkey || settings.hotkey || 'Fn'
 
+  const hasExportSelection = exportSettings || exportHistory || exportDictionary || exportPrompts
+  const hasImportSelection = importSettings || importHistory || importDictionary || importPrompts
+
   const handleExport = async () => {
+    if (!hasExportSelection) return
     setIsExporting(true)
     try {
-      await window.electron.dataExport({ includeHistory: exportIncludeHistory })
+      await window.electron.dataExport({
+        includeSettings: exportSettings,
+        includeHistory: exportHistory,
+        includeDictionary: exportDictionary,
+        includePrompts: exportPrompts
+      })
     } catch (error) {
       console.error('Failed to export:', error)
     } finally {
@@ -181,10 +233,32 @@ function Settings() {
   }
 
   const handleImport = async () => {
+    if (!hasImportSelection) return
+
+    // 上書きモードの場合は警告を表示
+    if (importMode === 'overwrite') {
+      const selectedItems: string[] = []
+      if (importSettings) selectedItems.push('設定')
+      if (importDictionary) selectedItems.push('単語帳')
+      if (importPrompts) selectedItems.push('プロンプト')
+      if (importHistory) selectedItems.push('履歴')
+
+      const confirmed = confirm(
+        `上書きモードでインポートすると、選択した項目（${selectedItems.join('、')}）の現在のデータが削除され、復元できません。\n\n続行しますか？`
+      )
+      if (!confirmed) return
+    }
+
     setIsImporting(true)
     setImportResult(null)
     try {
-      const result = await window.electron.dataImport({ mode: importMode })
+      const result = await window.electron.dataImport({
+        mode: importMode,
+        importSettings,
+        importHistory,
+        importDictionary,
+        importPrompts
+      })
       // キャンセルの場合は null が返る
       if (result) {
         setImportResult(result)
@@ -201,9 +275,54 @@ function Settings() {
   }
 
   return (
-    <div className="h-full overflow-auto">
-      <div className="max-w-2xl mx-auto p-6 space-y-8">
-        <h1 className="text-xl font-semibold">設定</h1>
+    <div className="h-full flex flex-col">
+      <PageHeader title="設定" />
+
+      <div className="flex-1 overflow-auto">
+        <div className="max-w-2xl mx-auto px-6 py-4 space-y-8">
+          {/* 一般 */}
+        <section className="space-y-4">
+          <h2 className="text-lg font-medium">一般</h2>
+          <div className="p-4 bg-gray-50 dark:bg-zinc-800 rounded-lg">
+            <div className="flex items-center justify-between">
+              <label className="flex items-center gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoLaunch}
+                  onChange={(e) => handleAutoLaunchChange(e.target.checked)}
+                  className="w-4 h-4"
+                />
+                <div>
+                  <p className="text-sm font-medium">Mac起動時に自動起動</p>
+                  <p className="text-xs text-gray-500">ログイン時にVoice Inputを自動的に起動します</p>
+                </div>
+              </label>
+              <div className="flex items-center gap-3">
+                {autoLaunch ? (
+                  <span className="text-green-600 dark:text-green-400 text-sm flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                    </svg>
+                    有効
+                  </span>
+                ) : (
+                  <span className="text-gray-400 dark:text-zinc-500 text-sm flex items-center gap-1">
+                    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+                      <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                    </svg>
+                    無効
+                  </span>
+                )}
+                <button
+                  onClick={() => window.electron.settingsOpenAutoLaunchSettings()}
+                  className="text-xs text-blue-600 dark:text-blue-400 hover:underline"
+                >
+                  設定を開く
+                </button>
+              </div>
+            </div>
+          </div>
+        </section>
 
         {/* Gemini API キー */}
         <section className="space-y-4">
@@ -211,34 +330,41 @@ function Settings() {
           <div className="p-4 bg-gray-50 dark:bg-zinc-800 rounded-lg space-y-4">
             <div>
               <label className="block text-sm font-medium mb-2">APIキー</label>
-              {hasApiKey ? (
-                <div className="flex items-center gap-2">
-                  <span className="text-green-600 dark:text-green-400 text-sm">設定済み</span>
-                  <button
-                    onClick={() => setHasApiKey(false)}
-                    className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-                  >
-                    変更
-                  </button>
-                </div>
-              ) : (
-                <div className="flex gap-2">
-                  <input
-                    type="password"
-                    value={apiKey}
-                    onChange={(e) => setApiKey(e.target.value)}
-                    placeholder="AIza..."
-                    className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
-                  <button
-                    onClick={handleSaveApiKey}
-                    disabled={isSaving || !apiKey.trim()}
-                    className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
-                  >
-                    保存
-                  </button>
-                </div>
-              )}
+              <div className="min-h-[42px] flex items-center">
+                {hasApiKey === null ? null : hasApiKey ? (
+                  <div className="flex items-center">
+                    <span className="text-green-600 dark:text-green-400 text-sm mr-4">設定済み</span>
+                    <button
+                      onClick={handleDeleteApiKey}
+                      className="text-sm text-red-600 dark:text-red-400 hover:underline"
+                    >
+                      削除
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-2 w-full">
+                    <div className="flex gap-2">
+                      <input
+                        type="password"
+                        value={apiKey}
+                        onChange={(e) => setApiKey(e.target.value)}
+                        placeholder="AIza..."
+                        className="flex-1 px-3 py-2 bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-600 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        onClick={handleSaveApiKey}
+                        disabled={isSaving || !apiKey.trim()}
+                        className="px-4 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 disabled:opacity-50"
+                      >
+                        保存
+                      </button>
+                    </div>
+                    <p className="text-xs text-amber-600 dark:text-amber-400">
+                      APIキーが設定されていません。音声認識結果は補正されずにそのまま入力されます。
+                    </p>
+                  </div>
+                )}
+              </div>
               <p className="text-xs text-gray-500 mt-2">
                 <a
                   href="https://aistudio.google.com/apikey"
@@ -431,34 +557,99 @@ function Settings() {
             <div>
               <p className="text-sm font-medium mb-2">エクスポート</p>
               <p className="text-xs text-gray-500 mb-3">
-                設定・単語帳・プロンプトをJSONファイルに書き出します（APIキーは含まれません）
+                選択したデータをJSONファイルに書き出します（APIキーは含まれません）
               </p>
-              <div className="flex items-center gap-4">
+              <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-white dark:bg-zinc-900 rounded-lg border border-gray-200 dark:border-zinc-700">
                 <label className="flex items-center gap-2 text-sm">
                   <input
                     type="checkbox"
-                    checked={exportIncludeHistory}
-                    onChange={(e) => setExportIncludeHistory(e.target.checked)}
+                    checked={exportSettings}
+                    onChange={(e) => setExportSettings(e.target.checked)}
                     className="rounded"
                   />
-                  履歴を含める
+                  設定
                 </label>
-                <button
-                  onClick={handleExport}
-                  disabled={isExporting}
-                  className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 disabled:opacity-50"
-                >
-                  {isExporting ? 'エクスポート中...' : 'エクスポート'}
-                </button>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportHistory}
+                    onChange={(e) => setExportHistory(e.target.checked)}
+                    className="rounded"
+                  />
+                  履歴
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportDictionary}
+                    onChange={(e) => setExportDictionary(e.target.checked)}
+                    className="rounded"
+                  />
+                  単語帳
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={exportPrompts}
+                    onChange={(e) => setExportPrompts(e.target.checked)}
+                    className="rounded"
+                  />
+                  プロンプト
+                </label>
               </div>
+              <button
+                onClick={handleExport}
+                disabled={isExporting || !hasExportSelection}
+                className="px-4 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600 disabled:opacity-50"
+              >
+                {isExporting ? 'エクスポート中...' : 'エクスポート'}
+              </button>
             </div>
 
             {/* インポート */}
             <div className="pt-4 border-t border-gray-200 dark:border-zinc-700">
               <p className="text-sm font-medium mb-2">インポート</p>
               <p className="text-xs text-gray-500 mb-3">
-                エクスポートしたJSONファイルから設定を復元します
+                エクスポートしたJSONファイルから選択したデータを復元します
               </p>
+              <div className="grid grid-cols-2 gap-2 mb-3 p-3 bg-white dark:bg-zinc-900 rounded-lg border border-gray-200 dark:border-zinc-700">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={importSettings}
+                    onChange={(e) => setImportSettings(e.target.checked)}
+                    className="rounded"
+                  />
+                  設定
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={importHistory}
+                    onChange={(e) => setImportHistory(e.target.checked)}
+                    className="rounded"
+                  />
+                  履歴
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={importDictionary}
+                    onChange={(e) => setImportDictionary(e.target.checked)}
+                    className="rounded"
+                  />
+                  単語帳
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={importPrompts}
+                    onChange={(e) => setImportPrompts(e.target.checked)}
+                    className="rounded"
+                  />
+                  プロンプト
+                </label>
+              </div>
               <div className="flex items-center gap-4 mb-3">
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -481,7 +672,7 @@ function Settings() {
               </div>
               <button
                 onClick={handleImport}
-                disabled={isImporting}
+                disabled={isImporting || !hasImportSelection}
                 className="px-4 py-2 bg-gray-200 dark:bg-zinc-700 text-sm rounded-lg hover:bg-gray-300 dark:hover:bg-zinc-600 disabled:opacity-50"
               >
                 {isImporting ? 'インポート中...' : 'ファイルを選択してインポート'}
@@ -525,6 +716,7 @@ function Settings() {
             </div>
           </div>
         </section>
+        </div>
       </div>
     </div>
   )

@@ -35,6 +35,11 @@ async function setApiKey(apiKey: string): Promise<void> {
     })
 }
 
+async function deleteApiKey(): Promise<void> {
+  const db = getDb()
+  await db.delete(settings).where(eq(settings.key, 'geminiApiKey'))
+}
+
 export function registerGeminiHandlers(): void {
   ipcMain.handle('gemini:rewrite', async (_event, text: string, promptId?: number) => {
     const { performRewrite } = await import('../services/gemini/GeminiClient')
@@ -42,11 +47,19 @@ export function registerGeminiHandlers(): void {
   })
 
   ipcMain.handle('gemini:setApiKey', async (_event, apiKey: string) => {
+    const { resetGenAI } = await import('../services/gemini/GeminiClient')
     await setApiKey(apiKey)
+    resetGenAI()  // キャッシュをリセット
   })
 
   ipcMain.handle('gemini:hasApiKey', async () => {
     const key = await getApiKey()
     return !!key
+  })
+
+  ipcMain.handle('gemini:deleteApiKey', async () => {
+    const { resetGenAI } = await import('../services/gemini/GeminiClient')
+    await deleteApiKey()
+    resetGenAI()  // キャッシュをリセット
   })
 }

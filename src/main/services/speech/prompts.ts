@@ -1,52 +1,58 @@
 import { getDb } from '../../db'
-import { prompts } from '../../db/schema'
-import { eq } from 'drizzle-orm'
+import { prompts, promptAppPatterns } from '../../db/schema'
+import { eq, desc } from 'drizzle-orm'
 import type { PromptEntry } from '../../../shared/types'
 
 export async function getPromptForApp(appName: string): Promise<PromptEntry | null> {
   const db = getDb()
 
-  // まずアプリパターンにマッチするプロンプトを探す
-  const allPrompts = await db.select().from(prompts)
+  // 新テーブル（promptAppPatterns）からアプリパターンにマッチするプロンプトを探す
+  const allPatterns = await db
+    .select({
+      promptId: promptAppPatterns.promptId,
+      appPattern: promptAppPatterns.appPattern
+    })
+    .from(promptAppPatterns)
 
-  for (const prompt of allPrompts) {
-    if (prompt.appPatterns) {
-      try {
-        const patterns: string[] = JSON.parse(prompt.appPatterns)
-        for (const pattern of patterns) {
-          if (appName.toLowerCase().includes(pattern.toLowerCase())) {
-            return mapToPromptEntry(prompt)
-          }
-        }
-      } catch {
-        // パターンのパースエラーは無視
+  for (const { promptId, appPattern } of allPatterns) {
+    // case-insensitive マッチング
+    if (appName.toLowerCase().includes(appPattern.toLowerCase())) {
+      const prompt = await db
+        .select()
+        .from(prompts)
+        .where(eq(prompts.id, promptId))
+        .limit(1)
+      if (prompt.length > 0) {
+        return await mapToPromptEntry(prompt[0])
       }
     }
   }
 
-  // マッチしない場合はデフォルトプロンプトを返す
+  // マッチしない場合はデフォルトプロンプト（isDefault: true かつ updatedAt 最新）を返す
   const defaultPrompt = await db
     .select()
     .from(prompts)
     .where(eq(prompts.isDefault, true))
+    .orderBy(desc(prompts.updatedAt), desc(prompts.id))
     .limit(1)
 
   if (defaultPrompt.length > 0) {
-    return mapToPromptEntry(defaultPrompt[0])
+    return await mapToPromptEntry(defaultPrompt[0])
   }
 
   return null
 }
 
-function mapToPromptEntry(row: typeof prompts.$inferSelect): PromptEntry {
-  let appPatterns: string[] | null = null
-  if (row.appPatterns) {
-    try {
-      appPatterns = JSON.parse(row.appPatterns)
-    } catch {
-      appPatterns = null
-    }
-  }
+async function mapToPromptEntry(row: typeof prompts.$inferSelect): Promise<PromptEntry> {
+  const db = getDb()
+
+  // 新テーブルからパターンを取得
+  const patterns = await db
+    .select({ appPattern: promptAppPatterns.appPattern })
+    .from(promptAppPatterns)
+    .where(eq(promptAppPatterns.promptId, row.id))
+
+  const appPatterns = patterns.length > 0 ? patterns.map((p) => p.appPattern) : null
 
   return {
     id: row.id,
@@ -54,6 +60,7 @@ function mapToPromptEntry(row: typeof prompts.$inferSelect): PromptEntry {
     content: row.content,
     appPatterns,
     isDefault: row.isDefault,
-    createdAt: row.createdAt
+    createdAt: row.createdAt,
+    updatedAt: row.updatedAt
   }
 }

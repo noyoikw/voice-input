@@ -41,6 +41,7 @@ export function registerHistoryHandlers(): void {
       .values({
         rawText: entry.rawText,
         rewrittenText: entry.rewrittenText,
+        isRewritten: entry.isRewritten,
         appName: entry.appName,
         promptId: entry.promptId,
         processingTimeMs: entry.processingTimeMs
@@ -86,6 +87,7 @@ function mapToHistoryEntry(row: typeof histories.$inferSelect): HistoryEntry {
     id: row.id,
     rawText: row.rawText,
     rewrittenText: row.rewrittenText,
+    isRewritten: row.isRewritten,
     appName: row.appName,
     promptId: row.promptId,
     processingTimeMs: row.processingTimeMs,

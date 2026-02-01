@@ -1,20 +1,36 @@
-import { ClockIcon, Cog6ToothIcon, BookOpenIcon, DocumentTextIcon } from './icons'
+import { useState, useEffect } from "react";
+import {
+  ClockIcon,
+  Cog6ToothIcon,
+  BookOpenIcon,
+  DocumentTextIcon,
+} from "./icons";
 
-type Page = 'history' | 'settings' | 'dictionary' | 'prompts'
+type Page = "history" | "settings" | "dictionary" | "prompts";
 
 interface SidebarProps {
-  currentPage: Page
-  onNavigate: (page: Page) => void
+  currentPage: Page;
+  onNavigate: (page: Page) => void;
 }
 
-const navItems: { page: Page; label: string; icon: React.FC<{ className?: string }> }[] = [
-  { page: 'history', label: '履歴', icon: ClockIcon },
-  { page: 'dictionary', label: '単語帳', icon: BookOpenIcon },
-  { page: 'prompts', label: 'プロンプト', icon: DocumentTextIcon },
-  { page: 'settings', label: '設定', icon: Cog6ToothIcon }
-]
+const navItems: {
+  page: Page;
+  label: string;
+  icon: React.FC<{ className?: string }>;
+}[] = [
+  { page: "history", label: "履歴", icon: ClockIcon },
+  { page: "dictionary", label: "単語帳", icon: BookOpenIcon },
+  { page: "prompts", label: "プロンプト", icon: DocumentTextIcon },
+  { page: "settings", label: "設定", icon: Cog6ToothIcon },
+];
 
 function Sidebar({ currentPage, onNavigate }: SidebarProps) {
+  const [version, setVersion] = useState<string>("");
+
+  useEffect(() => {
+    window.electron.appGetVersion().then(setVersion);
+  }, []);
+
   return (
     <aside className="w-56 bg-white/50 dark:bg-transparent flex flex-col border-r border-gray-200/50 dark:border-zinc-700/50">
       {/* タイトルバードラッグ領域 */}
@@ -31,8 +47,8 @@ function Sidebar({ currentPage, onNavigate }: SidebarProps) {
               transition-colors duration-150 titlebar-no-drag
               ${
                 currentPage === page
-                  ? 'bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400'
-                  : 'text-gray-700 dark:text-zinc-300 hover:bg-gray-200/50 dark:hover:bg-zinc-700/50'
+                  ? "bg-blue-500/10 text-blue-600 dark:bg-blue-500/20 dark:text-blue-400"
+                  : "text-gray-700 dark:text-zinc-300 hover:bg-gray-200/50 dark:hover:bg-zinc-700/50"
               }
             `}
           >
@@ -44,10 +60,10 @@ function Sidebar({ currentPage, onNavigate }: SidebarProps) {
 
       {/* フッター */}
       <div className="px-4 py-3 text-xs text-gray-400 dark:text-zinc-500">
-        Voice Input v0.1.0
+        Voice Input {version && `v${version}`}
       </div>
     </aside>
-  )
+  );
 }
 
-export default Sidebar
+export default Sidebar;

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { PlusIcon, TrashIcon, PencilIcon } from '../components/icons'
+import PageHeader from '../components/PageHeader'
 import type { DictionaryEntry } from '../../shared/types'
 
 function Dictionary() {
@@ -77,31 +78,14 @@ function Dictionary() {
 
   return (
     <div className="h-full flex flex-col">
-      {/* ヘッダー */}
-      <div className="p-4 border-b border-gray-200 dark:border-zinc-700">
-        <div className="flex items-center justify-between">
-          <h1 className="text-xl font-semibold">単語帳</h1>
-          <button
-            onClick={() => {
-              setIsAdding(true)
-              setEditingId(null)
-              setReading('')
-              setDisplay('')
-            }}
-            className="flex items-center gap-1 px-3 py-1.5 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600"
-          >
-            <PlusIcon className="w-4 h-4" />
-            追加
-          </button>
-        </div>
-        <p className="text-sm text-gray-500 mt-2">
-          音声認識で誤変換されやすい単語を登録すると、リライト時に正しく変換されます
-        </p>
-      </div>
+      <PageHeader
+        title="単語帳"
+        description="音声認識で誤変換されやすい単語を登録すると、リライト時に正しく変換されます"
+      />
 
       {/* 追加/編集フォーム */}
       {(isAdding || editingId !== null) && (
-        <div className="p-4 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-zinc-700">
+        <div className="px-6 py-4 bg-blue-50 dark:bg-blue-900/20 border-b border-gray-200 dark:border-zinc-700">
           <div className="flex gap-4 items-end">
             <div className="flex-1">
               <label className="block text-sm font-medium mb-1">読み（ひらがな）</label>
@@ -142,7 +126,7 @@ function Dictionary() {
       )}
 
       {/* 単語リスト */}
-      <div className="flex-1 overflow-auto p-4">
+      <div className="flex-1 overflow-auto px-6 py-3">
         {isLoading ? (
           <div className="text-center text-gray-500 py-8">読み込み中...</div>
         ) : entries.length === 0 ? (
@@ -157,7 +141,7 @@ function Dictionary() {
                 className="flex items-center justify-between p-3 bg-gray-50 dark:bg-zinc-800 rounded-lg group"
               >
                 <div className="flex items-center gap-4">
-                  <span className="text-gray-500 dark:text-zinc-400 text-sm min-w-[100px]">
+                  <span className="text-gray-500 dark:text-zinc-400 text-sm w-48 truncate">
                     {entry.reading}
                   </span>
                   <span className="font-medium">→</span>
@@ -182,6 +166,24 @@ function Dictionary() {
           </div>
         )}
       </div>
+
+      {/* フッター */}
+      {!isAdding && editingId === null && (
+        <div className="p-3 border-t border-gray-200 dark:border-zinc-700">
+          <button
+            onClick={() => {
+              setIsAdding(true)
+              setEditingId(null)
+              setReading('')
+              setDisplay('')
+            }}
+            className="flex items-center justify-center gap-1 px-3 py-2 bg-blue-500 text-white text-sm rounded-lg hover:bg-blue-600"
+          >
+            <PlusIcon className="w-4 h-4" />
+            単語を追加
+          </button>
+        </div>
+      )}
     </div>
   )
 }

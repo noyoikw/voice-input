@@ -118,8 +118,11 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
     private let audioEngine = AVAudioEngine()
 
     private var lastRecognizedText = ""
+    private var accumulatedSegments: [String] = []  // 過去のセグメントを蓄積
     private var isRecording = false
     private var stopTimer: Timer?
+    private var isWaitingForFinalResult = false
+    private var finalResultTimer: Timer?
 
     var onLevelChanged: ((Double) -> Void)?
 
@@ -154,6 +157,22 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
     }
 
     func startRecording() {
+        // 停止タイマーが動作中なら、キャンセルして録音を継続
+        if stopTimer != nil {
+            stopTimer?.invalidate()
+            stopTimer = nil
+            fputs("Stop timer cancelled, continuing recording\n", stderr)
+            return
+        }
+
+        // 最終結果待ち中なら、キャンセルして新しい録音を開始
+        if isWaitingForFinalResult {
+            fputs("Cancelling pending final result for new recording\n", stderr)
+            isWaitingForFinalResult = false
+            finalResultTimer?.invalidate()
+            finalResultTimer = nil
+        }
+
         guard !isRecording else { return }
         guard let speechRecognizer = speechRecognizer, speechRecognizer.isAvailable else {
             sendError(code: "START_ERROR", message: "Speech recognizer not available")
@@ -222,12 +241,43 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
             if let result = result {
                 let text = result.bestTranscription.formattedString
                 fputs("Recognition result: '\(text)' final=\(result.isFinal)\n", stderr)
+
+                // 空の final 結果は無視（既に部分結果がある場合）
+                // Apple Speech Recognition が endAudio() 後に空の final を返すことがある
+                let fullText = self.getFullText(currentSegment: text)
+                if result.isFinal && text.isEmpty && !fullText.isEmpty {
+                    fputs("Ignoring empty final result, keeping: '\(fullText)'\n", stderr)
+                    sendFinal(fullText)
+                    // 最終結果待ちの場合は完了処理（既にfinal送信済み）
+                    if self.isWaitingForFinalResult {
+                        self.completeFinalResult(alreadySentFinal: true)
+                    }
+                    return
+                }
+
+                // 認識がリセットされたかどうかを検出
+                // 新しいテキストが前のテキストの続きでない場合（prefix関係がない場合）、
+                // かつ短くなった場合は新しいセグメントが開始されたと判断
+                let isReset = !text.isEmpty && !self.lastRecognizedText.isEmpty &&
+                              !text.hasPrefix(self.lastRecognizedText) &&
+                              !self.lastRecognizedText.hasPrefix(text) &&
+                              text.count < self.lastRecognizedText.count
+                if isReset {
+                    // 前のセグメントを蓄積
+                    fputs("Segment reset detected: '\(self.lastRecognizedText)' -> '\(text)', accumulating previous segment\n", stderr)
+                    self.accumulatedSegments.append(self.lastRecognizedText)
+                }
+
                 self.lastRecognizedText = text
 
                 if result.isFinal {
-                    sendFinal(text)
+                    sendFinal(fullText)
+                    // 最終結果待ちの場合は完了処理（既にfinal送信済み）
+                    if self.isWaitingForFinalResult {
+                        self.completeFinalResult(alreadySentFinal: true)
+                    }
                 } else {
-                    sendPartial(text)
+                    sendPartial(fullText)
                 }
             }
         }
@@ -238,6 +288,7 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
             try audioEngine.start()
             isRecording = true
             lastRecognizedText = ""
+            accumulatedSegments = []  // セグメント蓄積もリセット
             fputs("Audio engine started successfully\n", stderr)
             sendStarted()
         } catch {
@@ -251,7 +302,7 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
 
         // Stop with delay to capture final words
         stopTimer?.invalidate()
-        stopTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+        stopTimer = Timer.scheduledTimer(withTimeInterval: 0.3, repeats: false) { [weak self] _ in
             self?.performStop()
         }
     }
@@ -275,12 +326,13 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
 
         isRecording = false
         lastRecognizedText = ""
+        accumulatedSegments = []  // セグメント蓄積もリセット
         sendCancelled()
     }
 
     private func performStop() {
-        // 最後の認識結果を保持
-        let finalText = lastRecognizedText
+        // タイマー参照をクリア（タイマー発火後なのでnilにする）
+        stopTimer = nil
 
         audioEngine.stop()
         audioEngine.inputNode.removeTap(onBus: 0)
@@ -288,20 +340,52 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         // endAudio を呼んで認識を完了させる
         recognitionRequest?.endAudio()
 
-        // タスクの完了を少し待ってからクリーンアップ
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+        isRecording = false
+
+        // 最終結果を待つフラグを立てる
+        isWaitingForFinalResult = true
+        fputs("Waiting for final recognition result...\n", stderr)
+
+        // タイムアウト: 1秒以内に最終結果が来なければ現在の結果で完了
+        finalResultTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
+            fputs("Final result timeout, completing with current text\n", stderr)
+            self?.completeFinalResult(alreadySentFinal: false)
+        }
+    }
+
+    private func completeFinalResult(alreadySentFinal: Bool) {
+        guard isWaitingForFinalResult else { return }
+        isWaitingForFinalResult = false
+        finalResultTimer?.invalidate()
+        finalResultTimer = nil
+
+        let finalText = getFullText(currentSegment: lastRecognizedText)
+        fputs("Completing with final text: '\(finalText)'\n", stderr)
+
+        // タスクのクリーンアップ
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
             self?.recognitionRequest = nil
             self?.recognitionTask?.cancel()
             self?.recognitionTask = nil
         }
 
-        isRecording = false
-
-        // partial結果しかなくても送信
-        if !finalText.isEmpty {
+        // タイムアウト時のみfinalを送信（まだ送信してない場合）
+        if !alreadySentFinal && !finalText.isEmpty {
             sendFinal(finalText)
         }
         sendStopped(finalText)
+    }
+
+    /// 蓄積されたセグメントと現在のセグメントを結合して完全なテキストを返す
+    private func getFullText(currentSegment: String) -> String {
+        if accumulatedSegments.isEmpty {
+            return currentSegment
+        }
+        var parts = accumulatedSegments
+        if !currentSegment.isEmpty {
+            parts.append(currentSegment)
+        }
+        return parts.joined(separator: " ")
     }
 
     func speechRecognizer(_ speechRecognizer: SFSpeechRecognizer, availabilityDidChange available: Bool) {
@@ -392,14 +476,14 @@ struct OrbHUDView: View {
         ZStack {
             // Track
             Circle()
-                .stroke(Color.white.opacity(0.2), lineWidth: 1.5)
-                .frame(width: 16, height: 16)
+                .stroke(Color.white.opacity(0.2), lineWidth: 2.0)
+                .frame(width: 18, height: 18)
 
             // Arc
             Circle()
                 .trim(from: 0, to: 0.3)
-                .stroke(Color.white.opacity(0.9), style: StrokeStyle(lineWidth: 1.5, lineCap: .round))
-                .frame(width: 16, height: 16)
+                .stroke(Color.white.opacity(0.9), style: StrokeStyle(lineWidth: 2.0, lineCap: .round))
+                .frame(width: 18, height: 18)
                 .rotationEffect(.degrees(spinnerRotation))
         }
         .onAppear {
@@ -742,6 +826,7 @@ class AppController {
 
     private func cancelRecording() {
         DispatchQueue.main.async { [weak self] in
+            self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
             self?.hudWindow?.orderOut(nil)
         }
         speechManager.cancelRecording()
@@ -766,10 +851,12 @@ class AppController {
             case "rewrite:start":
                 self?.hudViewController?.updateState(.rewriting)
             case "rewrite:done":
+                self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
                 self?.hudWindow?.orderOut(nil)
             case "rewrite:error":
                 self?.hudViewController?.updateState(.error(message.message ?? "エラー"))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+                    self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
                     self?.hudWindow?.orderOut(nil)
                 }
             case "hotkey:set":

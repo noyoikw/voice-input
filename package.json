@@ -1,6 +1,6 @@
 {
   "name": "voice-input",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "pnpm": {
     "onlyBuiltDependencies": [
       "better-sqlite3",
@@ -17,10 +17,12 @@
     "build": "electron-vite build",
     "preview": "electron-vite preview",
     "package": "electron-builder",
+    "package:dir": "electron-builder --dir",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.node.json --noEmit && tsc -p tsconfig.web.json --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "db:generate": "drizzle-kit generate",
-    "db:migrate": "drizzle-kit migrate"
+    "db:migrate": "drizzle-kit migrate",
+    "seed": "tsx scripts/seed.ts"
   },
   "dependencies": {
     "@electron-toolkit/preload": "^3.0.1",
@@ -48,6 +50,7 @@
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "tailwindcss": "^4.0.0",
+    "tsx": "^4.21.0",
     "typescript": "^5.7.3",
     "vite": "^6.0.7"
   }

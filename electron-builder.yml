@@ -25,6 +25,10 @@ mac:
   extraResources:
     - from: resources/speech-helper
       to: speech-helper
+    - from: resources/trayIconTemplate.png
+      to: trayIconTemplate.png
+    - from: resources/trayIconTemplate@2x.png
+      to: trayIconTemplate@2x.png
 dmg:
   artifactName: ${name}-${version}-${arch}.${ext}
 nsis:

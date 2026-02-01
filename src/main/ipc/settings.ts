@@ -1,4 +1,4 @@
-import { ipcMain } from 'electron'
+import { ipcMain, app, shell } from 'electron'
 import { getDb } from '../db'
 import { settings } from '../db/schema'
 import { eq } from 'drizzle-orm'
@@ -55,5 +55,28 @@ export function registerSettingsHandlers(): void {
     }
 
     return settingsObj
+  })
+
+  // 自動起動設定
+  ipcMain.handle('settings:getAutoLaunch', (): boolean => {
+    const settings = app.getLoginItemSettings()
+    return settings.openAtLogin
+  })
+
+  ipcMain.handle('settings:setAutoLaunch', (_event, enabled: boolean): void => {
+    app.setLoginItemSettings({
+      openAtLogin: enabled,
+      openAsHidden: true
+    })
+  })
+
+  ipcMain.handle('settings:openAutoLaunchSettings', async (): Promise<void> => {
+    // macOS Ventura以降のログイン項目設定を開く
+    await shell.openExternal('x-apple.systempreferences:com.apple.LoginItems-Settings.extension')
+  })
+
+  // アプリバージョン取得
+  ipcMain.handle('app:getVersion', (): string => {
+    return app.getVersion()
   })
 }

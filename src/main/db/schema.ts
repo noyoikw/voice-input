@@ -6,6 +6,7 @@ export const histories = sqliteTable('histories', {
   id: integer('id').primaryKey({ autoIncrement: true }),
   rawText: text('raw_text').notNull(),
   rewrittenText: text('rewritten_text'),
+  isRewritten: integer('is_rewritten', { mode: 'boolean' }).notNull().default(false),
   appName: text('app_name'),
   promptId: integer('prompt_id'),
   processingTimeMs: integer('processing_time_ms'),
@@ -33,7 +34,17 @@ export const prompts = sqliteTable('prompts', {
   content: text('content').notNull(),
   appPatterns: text('app_patterns'), // JSON配列として保存
   isDefault: integer('is_default', { mode: 'boolean' }).notNull().default(false),
-  createdAt: text('created_at').notNull().default(sql`(datetime('now', 'localtime'))`)
+  createdAt: text('created_at').notNull().default(sql`(datetime('now', 'localtime'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now', 'localtime'))`)
+})
+
+// プロンプト対象アプリパターン（1:Nリレーション）
+export const promptAppPatterns = sqliteTable('prompt_app_patterns', {
+  id: integer('id').primaryKey({ autoIncrement: true }),
+  promptId: integer('prompt_id')
+    .notNull()
+    .references(() => prompts.id, { onDelete: 'cascade' }),
+  appPattern: text('app_pattern').notNull().unique()
 })
 
 // ボイスメモ（将来機能）
@@ -53,3 +64,5 @@ export type DictionaryWord = typeof dictionary.$inferSelect
 export type NewDictionaryWord = typeof dictionary.$inferInsert
 export type Prompt = typeof prompts.$inferSelect
 export type NewPrompt = typeof prompts.$inferInsert
+export type PromptAppPattern = typeof promptAppPatterns.$inferSelect
+export type NewPromptAppPattern = typeof promptAppPatterns.$inferInsert

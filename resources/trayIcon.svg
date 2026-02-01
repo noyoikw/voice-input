@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16">
+  <!-- マイク本体 -->
+  <rect x="5" y="1" width="6" height="8" rx="3" fill="black"/>
+  <!-- マイクホルダー -->
+  <path d="M3 6.5 a5 5 0 0 0 10 0" stroke="black" stroke-width="1.5" fill="none"/>
+  <!-- スタンド -->
+  <path d="M8 11.5 v2.5 M5.5 14 h5" stroke="black" stroke-width="1.5" stroke-linecap="round"/>
+</svg>

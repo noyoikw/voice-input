@@ -35,6 +35,7 @@ const electronAPI: ElectronAPI = {
   geminiRewrite: (text, promptId) => ipcRenderer.invoke('gemini:rewrite', text, promptId),
   geminiSetApiKey: (apiKey) => ipcRenderer.invoke('gemini:setApiKey', apiKey),
   geminiHasApiKey: () => ipcRenderer.invoke('gemini:hasApiKey'),
+  geminiDeleteApiKey: () => ipcRenderer.invoke('gemini:deleteApiKey'),
 
   // History
   historyList: (limit, offset) => ipcRenderer.invoke('history:list', limit, offset),
@@ -53,6 +54,9 @@ const electronAPI: ElectronAPI = {
   settingsGet: <K extends keyof Settings>(key: K) => ipcRenderer.invoke('settings:get', key),
   settingsSet: <K extends keyof Settings>(key: K, value: Settings[K]) => ipcRenderer.invoke('settings:set', key, value),
   settingsGetAll: () => ipcRenderer.invoke('settings:getAll'),
+  settingsGetAutoLaunch: () => ipcRenderer.invoke('settings:getAutoLaunch'),
+  settingsSetAutoLaunch: (enabled: boolean) => ipcRenderer.invoke('settings:setAutoLaunch', enabled),
+  settingsOpenAutoLaunchSettings: () => ipcRenderer.invoke('settings:openAutoLaunchSettings'),
 
   // Dictionary
   dictionaryList: () => ipcRenderer.invoke('dictionary:list'),
@@ -67,6 +71,8 @@ const electronAPI: ElectronAPI = {
   promptsUpdate: (id, entry) => ipcRenderer.invoke('prompts:update', id, entry),
   promptsDelete: (id) => ipcRenderer.invoke('prompts:delete', id),
   promptsGetForApp: (appName) => ipcRenderer.invoke('prompts:getForApp', appName),
+  promptsRestoreDefault: (id) => ipcRenderer.invoke('prompts:restoreDefault', id),
+  promptsListAppPatterns: () => ipcRenderer.invoke('prompts:listAppPatterns'),
 
   // Theme
   themeGet: () => ipcRenderer.invoke('theme:get'),
@@ -91,7 +97,10 @@ const electronAPI: ElectronAPI = {
 
   // Data Export/Import
   dataExport: (options: ExportOptions) => ipcRenderer.invoke('data:export', options),
-  dataImport: (options: ImportOptions) => ipcRenderer.invoke('data:import', options)
+  dataImport: (options: ImportOptions) => ipcRenderer.invoke('data:import', options),
+
+  // App
+  appGetVersion: () => ipcRenderer.invoke('app:getVersion')
 }
 
 contextBridge.exposeInMainWorld('electron', electronAPI)

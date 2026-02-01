@@ -6,6 +6,7 @@ import type { HistoryEntry } from '../../../shared/types'
 export async function saveHistory(
   rawText: string,
   rewrittenText: string,
+  isRewritten: boolean,
   promptId?: number,
   processingTimeMs?: number
 ): Promise<HistoryEntry> {
@@ -15,6 +16,7 @@ export async function saveHistory(
   const result = await db.insert(histories).values({
     rawText,
     rewrittenText,
+    isRewritten,
     appName,
     promptId: promptId ?? null,
     processingTimeMs: processingTimeMs ?? null
@@ -25,6 +27,7 @@ export async function saveHistory(
     id: row.id,
     rawText: row.rawText,
     rewrittenText: row.rewrittenText,
+    isRewritten: row.isRewritten,
     appName: row.appName,
     promptId: row.promptId,
     processingTimeMs: row.processingTimeMs,

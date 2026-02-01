@@ -6,6 +6,10 @@ import { safeStorage } from 'electron'
 
 let genAI: GoogleGenerativeAI | null = null
 
+export function resetGenAI(): void {
+  genAI = null
+}
+
 async function getApiKey(): Promise<string | null> {
   const db = getDb()
   const result = await db.select().from(settings).where(eq(settings.key, 'geminiApiKey')).limit(1)
@@ -76,11 +80,16 @@ async function getPromptContent(promptId?: number): Promise<string> {
   return prompt.content
 }
 
-export async function performRewrite(text: string, promptId?: number): Promise<string> {
+export interface RewriteResult {
+  text: string
+  isRewritten: boolean
+}
+
+export async function performRewrite(text: string, promptId?: number): Promise<RewriteResult> {
   const ai = await getGenAI()
   if (!ai) {
     console.log('GeminiClient: No API key, returning original text')
-    return text
+    return { text, isRewritten: false }
   }
 
   try {
@@ -97,7 +106,7 @@ export async function performRewrite(text: string, promptId?: number): Promise<s
     const response = result.response
     const rewrittenText = response.text().trim()
 
-    return rewrittenText || text
+    return { text: rewrittenText || text, isRewritten: true }
   } catch (error) {
     console.error('GeminiClient: Rewrite failed', error)
     throw error
