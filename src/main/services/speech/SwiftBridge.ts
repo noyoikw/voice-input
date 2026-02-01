@@ -96,12 +96,16 @@ class SwiftBridge {
           const now = Date.now()
 
           // リセット検出: 新しい partial が前の partial の続きでない場合
-          // （最初の1文字が違う = 新しいセグメントが始まった）
           if (this.currentPartialText && newPartial) {
             const prevFirstChar = this.currentPartialText.charAt(0)
             const newFirstChar = newPartial.charAt(0)
-            if (prevFirstChar !== newFirstChar) {
-              // 1.5秒以上経過していれば蓄積、未満なら言い直し
+            const firstCharChanged = prevFirstChar !== newFirstChar
+            // 長さが30%以下に減少した場合もリセットとみなす
+            // （同じ文字で始まる新しいセグメントが来た場合に対応）
+            const significantlyShortened = newPartial.length < this.currentPartialText.length * 0.3
+
+            if (firstCharChanged || significantlyShortened) {
+              // しきい値以上経過していれば蓄積、未満なら言い直し
               if (this.lastUpdateTime && (now - this.lastUpdateTime) >= SwiftBridge.SEGMENT_THRESHOLD_MS) {
                 // 追加発話: 前の partial を確定済みとして蓄積
                 this.confirmedSegments.push(this.currentPartialText)
