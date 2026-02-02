@@ -33,6 +33,7 @@ pnpm-debug.log*
 # Swift build
 swift-helper/.build/
 swift-helper/.swiftpm/
+resources/speech-helper
 
 # Environment files
 .env

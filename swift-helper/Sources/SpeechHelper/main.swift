@@ -115,13 +115,17 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
     private let speechRecognizer: SFSpeechRecognizer?
     private var recognitionRequest: SFSpeechAudioBufferRecognitionRequest?
     private var recognitionTask: SFSpeechRecognitionTask?
-    private let audioEngine = AVAudioEngine()
+    private var audioEngine = AVAudioEngine()
 
     private var lastRecognizedText = ""
     private var isRecording = false
     private var stopTimer: Timer?
     private var isWaitingForFinalResult = false
     private var finalResultTimer: Timer?
+    private var isReconfiguring = false  // デバイス変更時の再設定中フラグ
+
+    // AVAudioEngine 操作用のシリアルキュー
+    private let audioQueue = DispatchQueue(label: "com.voiceinput.audioengine")
 
     var onLevelChanged: ((Double) -> Void)?
 
@@ -129,6 +133,126 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         speechRecognizer = SFSpeechRecognizer(locale: Locale(identifier: "ja-JP"))
         super.init()
         speechRecognizer?.delegate = self
+
+        // オーディオデバイス変更の監視
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioConfigurationChange),
+            name: NSNotification.Name.AVAudioEngineConfigurationChange,
+            object: audioEngine
+        )
+    }
+
+    deinit {
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    @objc private func handleAudioConfigurationChange(_ notification: Notification) {
+        fputs("Audio configuration changed (device switch detected)\n", stderr)
+
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            guard self.isRecording else { return }
+
+            // 既に再設定中なら無視（連続発火対策）
+            guard !self.isReconfiguring else {
+                fputs("Already reconfiguring, ignoring duplicate notification\n", stderr)
+                return
+            }
+
+            self.isReconfiguring = true
+
+            // 録音中にデバイスが変わった場合、再設定が必要
+            fputs("Reconfiguring audio engine due to device change...\n", stderr)
+
+            // 現在の録音を一時停止
+            self.audioEngine.stop()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+
+            // デバイス切り替え直後はフォーマットが安定しないため、遅延して再設定
+            self.audioQueue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                self?.reconfigureAudioEngineAfterDeviceChange(retryCount: 0)
+            }
+        }
+    }
+
+    private func reconfigureAudioEngineAfterDeviceChange(retryCount: Int) {
+        // audioQueue 上で呼ばれる前提
+        guard isRecording else {
+            isReconfiguring = false
+            return
+        }
+
+        let inputNode = audioEngine.inputNode
+        let recordingFormat = inputNode.outputFormat(forBus: 0)
+
+        // フォーマットが無効な場合はリトライ
+        if recordingFormat.sampleRate == 0 || recordingFormat.channelCount == 0 {
+            if retryCount < 5 {
+                fputs("Invalid audio format after device change (attempt \(retryCount + 1)), retrying...\n", stderr)
+                audioQueue.asyncAfter(deadline: .now() + 0.2) { [weak self] in
+                    self?.reconfigureAudioEngineAfterDeviceChange(retryCount: retryCount + 1)
+                }
+                return
+            } else {
+                fputs("Audio format still invalid after retries, stopping recording\n", stderr)
+                cleanupRecordingStateOnAudioQueue()
+                sendError(code: "DEVICE_CHANGE_ERROR", message: "Audio input not available after device change. Please try again.")
+                return
+            }
+        }
+
+        fputs("New audio format: sampleRate=\(recordingFormat.sampleRate), channels=\(recordingFormat.channelCount)\n", stderr)
+
+        // format: nil を指定して、ノードの実際のフォーマットを自動使用
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
+            self?.recognitionRequest?.append(buffer)
+
+            // Calculate audio level
+            let channelData = buffer.floatChannelData?[0]
+            let frameLength = Int(buffer.frameLength)
+            var sum: Float = 0
+            for i in 0..<frameLength {
+                sum += abs(channelData?[i] ?? 0)
+            }
+            let avgPower = sum / Float(frameLength)
+            let level = min(1.0, max(0.0, Double(avgPower * 50)))
+            sendLevel(level)
+            DispatchQueue.main.async {
+                self?.onLevelChanged?(level)
+            }
+        }
+
+        // エンジンを再起動
+        audioEngine.prepare()
+        do {
+            try audioEngine.start()
+            isReconfiguring = false
+            fputs("Audio engine reconfigured successfully after device change\n", stderr)
+        } catch {
+            fputs("Failed to restart audio engine after device change: \(error.localizedDescription)\n", stderr)
+            cleanupRecordingStateOnAudioQueue()
+            sendError(code: "DEVICE_CHANGE_ERROR", message: "Failed to restart after device change: \(error.localizedDescription)")
+        }
+    }
+
+    // audioQueue 上で呼ばれる前提のクリーンアップ
+    private func cleanupRecordingStateOnAudioQueue() {
+        isRecording = false
+        isReconfiguring = false
+        recognitionRequest?.endAudio()
+        recognitionRequest = nil
+        recognitionTask?.cancel()
+        recognitionTask = nil
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+    }
+
+    // メインキューから呼ばれるクリーンアップ
+    private func cleanupRecordingState() {
+        audioQueue.async { [weak self] in
+            self?.cleanupRecordingStateOnAudioQueue()
+        }
     }
 
     func requestAuthorization(completion: @escaping (Bool) -> Void) {
@@ -178,6 +302,11 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
             return
         }
 
+        // 早めに isRecording を立てて、直後の停止要求に対応できるようにする
+        isRecording = true
+        // デバイス再設定中フラグをリセット
+        isReconfiguring = false
+
         // オンデバイス認識が利用可能か確認
         if !speechRecognizer.supportsOnDeviceRecognition {
             fputs("Warning: On-device recognition not supported, falling back to server\n", stderr)
@@ -190,6 +319,7 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         // Create recognition request
         recognitionRequest = SFSpeechAudioBufferRecognitionRequest()
         guard let recognitionRequest = recognitionRequest else {
+            isRecording = false
             sendError(code: "START_ERROR", message: "Failed to create recognition request")
             return
         }
@@ -198,11 +328,70 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         recognitionRequest.taskHint = .dictation
         recognitionRequest.requiresOnDeviceRecognition = true
 
-        // Configure audio input
+        // audioQueue でオーディオ関連処理を実行
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.setupAudioEngineAndStart(speechRecognizer: speechRecognizer, recognitionRequest: recognitionRequest)
+        }
+    }
+
+    private func setupAudioEngineAndStart(speechRecognizer: SFSpeechRecognizer, recognitionRequest: SFSpeechAudioBufferRecognitionRequest) {
+        // audioQueue 上で呼ばれる前提
+
+        // 録音が既にキャンセルされていたら終了
+        guard isRecording else { return }
+
+        // デバイス変更後は新しいエンジンインスタンスを作成
+        // reset() だけでは古いデバイス設定が残る場合がある
+        audioEngine.stop()
+        audioEngine.inputNode.removeTap(onBus: 0)
+
+        // NotificationCenter から古いエンジンの監視を解除
+        // NotificationCenter はスレッドセーフなので audioQueue 上で操作可能
+        NotificationCenter.default.removeObserver(self, name: NSNotification.Name.AVAudioEngineConfigurationChange, object: audioEngine)
+
+        // 新しいエンジンを作成
+        audioEngine = AVAudioEngine()
+
+        // 新しいエンジンの監視を開始（録音開始前に登録を完了させる）
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAudioConfigurationChange),
+            name: NSNotification.Name.AVAudioEngineConfigurationChange,
+            object: audioEngine
+        )
+
+        startRecordingOnAudioQueue(speechRecognizer: speechRecognizer, recognitionRequest: recognitionRequest, retryCount: 0)
+    }
+
+    private func startRecordingOnAudioQueue(speechRecognizer: SFSpeechRecognizer, recognitionRequest: SFSpeechAudioBufferRecognitionRequest, retryCount: Int) {
+        // audioQueue 上で呼ばれる前提
+        // 停止要求があった場合は処理を中断
+        guard isRecording else { return }
+
         let inputNode = audioEngine.inputNode
         let recordingFormat = inputNode.outputFormat(forBus: 0)
 
-        inputNode.installTap(onBus: 0, bufferSize: 1024, format: recordingFormat) { [weak self] buffer, _ in
+        // フォーマットが無効な場合（デバイス切り替え直後など）はリトライ
+        if recordingFormat.sampleRate == 0 || recordingFormat.channelCount == 0 {
+            if retryCount < 3 {
+                fputs("Invalid audio format detected (sampleRate=\(recordingFormat.sampleRate), channels=\(recordingFormat.channelCount)), retrying (attempt \(retryCount + 1))...\n", stderr)
+                audioQueue.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                    self?.startRecordingOnAudioQueue(speechRecognizer: speechRecognizer, recognitionRequest: recognitionRequest, retryCount: retryCount + 1)
+                }
+                return
+            } else {
+                fputs("Audio format still invalid after retries\n", stderr)
+                isRecording = false
+                sendError(code: "AUDIO_FORMAT_ERROR", message: "Audio input not available. Please check your microphone connection.")
+                return
+            }
+        }
+
+        fputs("Audio format: sampleRate=\(recordingFormat.sampleRate), channels=\(recordingFormat.channelCount)\n", stderr)
+
+        // format: nil を指定して、ノードの実際のフォーマットを自動使用
+        inputNode.installTap(onBus: 0, bufferSize: 1024, format: nil) { [weak self] buffer, _ in
             self?.recognitionRequest?.append(buffer)
 
             // Calculate audio level
@@ -269,12 +458,13 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         audioEngine.prepare()
         do {
             try audioEngine.start()
-            isRecording = true
+            // isRecording は startRecording() で既に true に設定済み
             lastRecognizedText = ""
             fputs("Audio engine started successfully\n", stderr)
             sendStarted()
         } catch {
             fputs("Audio engine start failed: \(error.localizedDescription)\n", stderr)
+            isRecording = false
             sendError(code: "START_ERROR", message: "Failed to start audio engine: \(error.localizedDescription)")
         }
     }
@@ -295,37 +485,46 @@ class SpeechManager: NSObject, SFSpeechRecognizerDelegate {
         // キャンセル時は即座に停止（遅延なし）
         stopTimer?.invalidate()
         stopTimer = nil
+        isRecording = false
+        isReconfiguring = false
+        lastRecognizedText = ""
 
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-        recognitionRequest?.endAudio()
+        // オーディオ操作は audioQueue で実行
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.audioEngine.stop()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+            self.recognitionRequest?.endAudio()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-            self?.recognitionRequest = nil
-            self?.recognitionTask?.cancel()
-            self?.recognitionTask = nil
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                self?.recognitionRequest = nil
+                self?.recognitionTask?.cancel()
+                self?.recognitionTask = nil
+            }
         }
 
-        isRecording = false
-        lastRecognizedText = ""
         sendCancelled()
     }
 
     private func performStop() {
         // タイマー参照をクリア（タイマー発火後なのでnilにする）
         stopTimer = nil
-
-        audioEngine.stop()
-        audioEngine.inputNode.removeTap(onBus: 0)
-
-        // endAudio を呼んで認識を完了させる
-        recognitionRequest?.endAudio()
-
         isRecording = false
+        isReconfiguring = false
 
         // 最終結果を待つフラグを立てる
         isWaitingForFinalResult = true
         fputs("Waiting for final recognition result...\n", stderr)
+
+        // オーディオ操作は audioQueue で実行
+        audioQueue.async { [weak self] in
+            guard let self = self else { return }
+            self.audioEngine.stop()
+            self.audioEngine.inputNode.removeTap(onBus: 0)
+
+            // endAudio を呼んで認識を完了させる
+            self.recognitionRequest?.endAudio()
+        }
 
         // タイムアウト: 1秒以内に最終結果が来なければ現在の結果で完了
         finalResultTimer = Timer.scheduledTimer(withTimeInterval: 1.0, repeats: false) { [weak self] _ in
