@@ -20,6 +20,10 @@ class SwiftBridge {
   private statusChangeCallbacks: ((status: SpeechStatus) => void)[] = []
   private permissionsCallback: ((permissions: SwiftPermissions) => void) | null = null
 
+  // リライトキャンセル用
+  private rewriteAbortController: AbortController | null = null
+  private rewriteCancelled = false  // レース条件対策用フラグ
+
   start(): void {
     if (this.process) {
       console.log('SwiftBridge: Already running')
@@ -156,6 +160,11 @@ class SwiftBridge {
           this.setStatus('idle')
           break
 
+        case 'rewrite:cancelled':
+          console.log('SwiftBridge: Rewrite cancelled by user (ESC)')
+          this.cancelRewrite()
+          break
+
         case 'level':
           this.sendToRenderer('speech:level', message.level)
           break
@@ -197,7 +206,34 @@ class SwiftBridge {
   }
 
   private async triggerRewrite(): Promise<void> {
+    // フラグを冒頭でリセット（前回のキャンセル状態が残らないように）
+    const wasCancelled = this.rewriteCancelled
+    this.rewriteCancelled = false
+
     if (!this.lastText.trim()) {
+      this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
+      this.setStatus('idle')
+      return
+    }
+
+    // レース条件対策: triggerRewrite より先にキャンセルが来ていたら即終了
+    if (wasCancelled) {
+      console.log('SwiftBridge: Rewrite was already cancelled before starting')
+      this.rewriteCancelled = false
+      this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
+      this.setStatus('idle')
+      return
+    }
+
+    // AbortController を作成
+    this.rewriteAbortController = new AbortController()
+
+    // レース条件対策: AbortController 作成後にもキャンセルフラグを再チェック
+    // （フラグリセット後〜AbortController作成前にキャンセルが来た場合に対応）
+    if (this.rewriteCancelled) {
+      console.log('SwiftBridge: Rewrite was cancelled during setup')
+      this.rewriteCancelled = false
+      this.rewriteAbortController = null
       this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
       this.setStatus('idle')
       return
@@ -214,30 +250,82 @@ class SwiftBridge {
       const prompt = appName ? await getPromptForApp(appName) : null
       const promptId = prompt?.id
 
-      // Gemini rewrite を呼び出す
+      // Gemini rewrite を呼び出す（AbortSignal を渡す）
       const { performRewrite } = await import('../gemini/GeminiClient')
-      const rewriteResult = await performRewrite(this.lastText, promptId)
+      const rewriteResult = await performRewrite(this.lastText, promptId, {
+        signal: this.rewriteAbortController.signal
+      })
+
+      // キャンセルチェック: rewrite 成功後もキャンセルされていたら処理を中断
+      if (this.rewriteAbortController?.signal.aborted) {
+        console.log('SwiftBridge: Rewrite was cancelled after completion, skipping paste')
+        this.rewriteAbortController = null
+        this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
+        this.setStatus('idle')
+        return
+      }
 
       this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
 
+      // キャンセルチェック用のヘルパー
+      const checkCancelled = (): boolean => {
+        return this.rewriteAbortController?.signal.aborted ?? false
+      }
+
       // クリップボードにコピーしてペースト
+      if (checkCancelled()) {
+        console.log('SwiftBridge: Cancelled before paste')
+        this.rewriteAbortController = null
+        this.setStatus('idle')
+        return
+      }
       const { pasteText } = await import('../clipboard/manager')
       await pasteText(rewriteResult.text)
 
       // 履歴に保存してレンダラーに通知
+      if (checkCancelled()) {
+        console.log('SwiftBridge: Cancelled before saving history')
+        this.rewriteAbortController = null
+        this.setStatus('idle')
+        return
+      }
       const { saveHistory } = await import('./history')
       const historyEntry = await saveHistory(this.lastText, rewriteResult.text, rewriteResult.isRewritten, promptId)
       this.sendToRenderer('history:created', historyEntry)
 
+      // 全ての処理が完了してから AbortController をクリア
+      this.rewriteAbortController = null
       this.setStatus('completed')
       setTimeout(() => this.setStatus('idle'), 500)
     } catch (error) {
+      this.rewriteAbortController = null
+
+      // キャンセルされた場合は特別な処理（name プロパティでチェック - Node/Electron 互換）
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.log('SwiftBridge: Rewrite was cancelled, returning to idle')
+        this.sendToSwift({ type: 'rewrite:done', sessionId: this.currentSessionId || undefined })
+        this.setStatus('idle')
+        return
+      }
+
       console.error('SwiftBridge: Rewrite failed', error)
       const errorMessage = error instanceof Error ? error.message : 'Unknown error'
       this.sendToSwift({ type: 'rewrite:error', sessionId: this.currentSessionId || undefined, message: errorMessage })
       this.sendToRenderer('speech:error', { code: 'REWRITE_ERROR', message: errorMessage })
       this.setStatus('error')
       setTimeout(() => this.setStatus('idle'), 3000)
+    }
+  }
+
+  private cancelRewrite(): void {
+    if (this.rewriteAbortController) {
+      this.rewriteAbortController.abort()
+      // 実際のクリーンアップは triggerRewrite の catch で行われる
+    } else {
+      // AbortController がまだ作られていない場合（レース条件）
+      // フラグを立てて triggerRewrite で検出できるようにする
+      // （rewrite:done 送信と状態更新は triggerRewrite 側で行う - 二重送信防止）
+      this.rewriteCancelled = true
     }
   }
 

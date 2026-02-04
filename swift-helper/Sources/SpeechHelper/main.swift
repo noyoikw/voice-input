@@ -66,6 +66,10 @@ func sendCancelled() {
     sendMessage(OutgoingMessage(type: "cancelled", text: nil, level: nil, code: nil, message: nil, sessionId: nil, permissions: nil))
 }
 
+func sendRewriteCancelled() {
+    sendMessage(OutgoingMessage(type: "rewrite:cancelled", text: nil, level: nil, code: nil, message: nil, sessionId: nil, permissions: nil))
+}
+
 func sendLevel(_ level: Double) {
     sendMessage(OutgoingMessage(type: "level", text: nil, level: level, code: nil, message: nil, sessionId: nil, permissions: nil))
 }
@@ -820,9 +824,15 @@ class KeyMonitor {
     var onKeyDown: (() -> Void)?
     var onKeyUp: (() -> Void)?
     var onCancelKeyPressed: (() -> Void)?
+    var onRewriteCancelPressed: (() -> Void)?
 
     /// 録音中フラグ（録音中のみキャンセルキーを処理）
     var isRecording = false
+    /// リライト中フラグ（リライト中はESCでキャンセル）
+    var isRewriting = false
+
+    /// ESCキーのkeyCode
+    private let escapeKeyCode: Int64 = 53
 
     /// 修飾キーのkeyCode一覧（これらはキャンセル対象外）
     private let modifierKeyCodes: Set<Int64> = [
@@ -895,6 +905,13 @@ class KeyMonitor {
         if type == .keyDown {
             let isTriggerKey = hotkeyConfig.triggerKeyCodes.contains(keyCode)
             let isModifierKey = modifierKeyCodes.contains(keyCode)
+            let isEscapeKey = keyCode == escapeKeyCode
+
+            // リライト中にESCキーが押されたらリライトをキャンセル
+            if isRewriting && isEscapeKey {
+                onRewriteCancelPressed?()
+                return Unmanaged.passRetained(event)
+            }
 
             // 録音中に通常キー（ホットキー以外、修飾キー以外）が押されたらキャンセル
             if isRecording && !isTriggerKey && !isModifierKey {
@@ -977,6 +994,10 @@ class AppController {
             self?.cancelRecording()
         }
 
+        keyMonitor.onRewriteCancelPressed = { [weak self] in
+            self?.cancelRewriting()
+        }
+
         if !keyMonitor.start() {
             // Error already sent in KeyMonitor
         }
@@ -999,10 +1020,20 @@ class AppController {
 
     private func stopRecording() {
         keyMonitor.isRecording = false
+        keyMonitor.isRewriting = true
         DispatchQueue.main.async { [weak self] in
             self?.hudViewController?.updateState(.rewriting)
         }
         speechManager.stopRecording()
+    }
+
+    private func cancelRewriting() {
+        keyMonitor.isRewriting = false
+        DispatchQueue.main.async { [weak self] in
+            self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
+            self?.hudWindow?.orderOut(nil)
+        }
+        sendRewriteCancelled()
     }
 
     private func cancelRecording() {
@@ -1031,11 +1062,14 @@ class AppController {
         DispatchQueue.main.async { [weak self] in
             switch message.type {
             case "rewrite:start":
+                self?.keyMonitor.isRewriting = true
                 self?.hudViewController?.updateState(.rewriting)
             case "rewrite:done":
+                self?.keyMonitor.isRewriting = false
                 self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット
                 self?.hudWindow?.orderOut(nil)
             case "rewrite:error":
+                self?.keyMonitor.isRewriting = false
                 self?.hudViewController?.updateState(.error(message.message ?? "エラー"))
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
                     self?.hudViewController?.updateState(.recording)  // 次回表示用にリセット

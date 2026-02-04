@@ -9,7 +9,7 @@ export interface SwiftPermissions {
 
 // Swift Helper からのメッセージ
 export interface SwiftMessage {
-  type: 'ready' | 'started' | 'partial' | 'final' | 'stopped' | 'cancelled' | 'level' | 'error' | 'permissions'
+  type: 'ready' | 'started' | 'partial' | 'final' | 'stopped' | 'cancelled' | 'rewrite:cancelled' | 'level' | 'error' | 'permissions'
   text?: string
   level?: number
   code?: string
