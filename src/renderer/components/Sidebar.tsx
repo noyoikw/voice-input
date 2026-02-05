@@ -34,7 +34,7 @@ function Sidebar({ currentPage, onNavigate }: SidebarProps) {
   return (
     <aside className="w-56 bg-white/50 dark:bg-transparent flex flex-col border-r border-gray-200/50 dark:border-zinc-700/50">
       {/* タイトルバードラッグ領域 */}
-      <div className="h-10 titlebar-drag" />
+      <div className="h-12 titlebar-drag" />
 
       {/* ナビゲーション */}
       <nav className="flex-1 px-3 py-2 space-y-1">

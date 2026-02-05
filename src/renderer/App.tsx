@@ -40,7 +40,7 @@ function App() {
       <Sidebar currentPage={currentPage} onNavigate={setCurrentPage} />
       <main className="relative flex-1 overflow-auto bg-white dark:bg-zinc-900 text-gray-900 dark:text-zinc-100">
         {/* タイトルバードラッグ領域（オーバーレイ） */}
-        <div className="absolute top-0 left-0 right-0 h-10 titlebar-drag" />
+        <div className="absolute top-0 left-0 right-0 h-12 titlebar-drag" />
         {renderPage()}
       </main>
     </div>
